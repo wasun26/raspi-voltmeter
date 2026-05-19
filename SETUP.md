@@ -1,158 +1,165 @@
-# Complete setup instructions for Raspberry Pi OS
+# Setup
 
-## Prerequisites
+Setup instructions for Raspberry Pi OS and development machines.
 
-- Raspberry Pi 4B (or higher) with Raspberry Pi OS (Debian-based)
-- Internet connection
-- SSH access or direct terminal
+## Raspberry Pi OS
 
-## Quick Setup (One Command)
+### Prerequisites
 
-On Raspberry Pi OS terminal:
+- Raspberry Pi with Raspberry Pi OS
+- SPI enabled
+- ADS1256 board wired to the configured GPIO pins
+- Internet connection for package installation
+
+Default ADS1256 wiring/configuration:
+
+| Signal | BCM pin |
+| --- | ---: |
+| DRDY | 17 |
+| RESET | 18 |
+| CS | 22 |
+| SPI bus/device | 0 / 0 |
+
+### Quick Setup
 
 ```bash
 cd /path/to/raspi-voltmeter
 bash setup.sh
-```
-
-This will:
-
-1. ✓ Update package manager
-2. ✓ Install all system dependencies (PyQt6, Qt libraries, I2C/SPI tools)
-3. ✓ Enable I2C and SPI interfaces
-4. ✓ Create Python virtual environment
-5. ✓ Install Python packages (PyQt6, pyqtgraph, numpy, smbus2, spidev)
-6. ✓ Add user to I2C/GPIO groups (no password needed after reboot)
-
-## After Setup
-
-### 1. Reboot (required for I2C/SPI and group changes)
-
-```bash
 sudo reboot
 ```
 
-### 2. Verify hardware interfaces
+The setup script installs Python/Qt dependencies, enables SPI/I2C where possible, creates `.venv`, and installs `requirements.txt`.
+
+After reboot:
 
 ```bash
-# Check I2C devices
-i2cdetect -y 1
-
-# Check SPI devices
-sudo ls /dev/spi*
+cd /path/to/raspi-voltmeter
+source .venv/bin/activate
 ```
 
-### 3. Run real application (GUI)
+Verify SPI device nodes:
 
 ```bash
-source .venv/bin/activate
+ls /dev/spi*
+```
+
+Run the terminal monitor:
+
+```bash
+python serial_monitor.py --rate 10 --channels 0 --count 10
+```
+
+Run the GUI:
+
+```bash
 python main.py
 ```
 
-### 4. Run terminal-only monitor (no GUI)
+## Development Machine
+
+Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File setup.ps1
+.venv\Scripts\activate
+python serial_monitor.py --mock --rate 5 --count 5
+python main.py
+```
+
+Linux/macOS:
 
 ```bash
+python -m venv .venv
 source .venv/bin/activate
-python serial_monitor.py --rate 10 --channels 0
+pip install -r requirements.txt
+python serial_monitor.py --mock --rate 5 --count 5
+python main.py
 ```
 
-## Next: Implement ADC Driver
+## Dependencies
 
-Edit `hardware/adc.py` to implement your specific ADC board:
+Portable dependencies in `requirements.txt`:
 
-### Example: ADS1115 (I2C)
+- `PyQt6`
+- `pyqtgraph`
+- `numpy`
+
+Raspberry Pi OS hardware dependencies:
+
+- `spidev`
+- `RPi.GPIO`
+
+The provided `setup.sh` installs Raspberry Pi system packages including `python3-spidev`. If your Raspberry Pi OS image does not already provide `RPi.GPIO`, install it with:
+
+```bash
+sudo apt-get install python3-rpi.gpio
+```
+
+## Configuration
+
+Runtime defaults are in `config.py`.
+
+Important ADS1256 fields:
 
 ```python
-import smbus2
-import time
-
-class ADS1115(AdcDevice):
-    def __init__(self, i2c_addr=0x48, channel=0):
-        self.bus = smbus2.SMBus(1)
-        self.addr = i2c_addr
-        self.channel = channel
-
-    def read_voltage(self, channel=0):
-        # Read from ADS1115 register
-        # Convert to voltage (typically 0-6.144V range)
-        pass
+"adc": {
+    "type": "auto",
+    "spi_bus": 0,
+    "spi_device": 0,
+    "drdy_pin": 17,
+    "reset_pin": 18,
+    "cs_pin": 22,
+    "spi_hz": 20000,
+    "vref": 2.5,
+    "gain": 1,
+    "data_rate": 1000,
+    "single_ended": True,
+    "validate_chip_id": True,
+    "expected_chip_id": 3,
+}
 ```
 
-### Example: ADS1256 (SPI)
-
-```python
-import spidev
-
-class ADS1256(AdcDevice):
-    def __init__(self, bus=0, device=0):
-        self.spi = spidev.SpiDev()
-        self.spi.open(bus, device)
-        self.spi.max_speed_hz = 1000000
-
-    def read_voltage(self, channel=0):
-        # SPI communication to ADS1256
-        # Convert to voltage
-        pass
-```
+Use `"type": "mock"` to force mock mode. Use `"type": "ads1256"` to require real hardware and fail if the ADS1256 cannot initialize.
 
 ## Troubleshooting
 
-### I2C not detected
+### SPI device missing
 
 ```bash
-# Check if i2c kernel module is loaded
-lsmod | grep i2c
-
-# Check devices
-ls /dev/i2c*
+sudo raspi-config
 ```
 
-### Permission denied on /dev/i2c-\*
+Enable SPI under Interface Options, reboot, then check:
 
 ```bash
-# Add user to i2c group
-sudo usermod -a -G i2c $USER
+ls /dev/spi*
+```
+
+### Permission denied for GPIO or SPI
+
+Run the setup script, then reboot so group changes apply:
+
+```bash
+bash setup.sh
 sudo reboot
 ```
 
-### PyQt6 display issues
+### ADS1256 chip ID mismatch
 
-- Use X11 forwarding if SSH: `ssh -X user@raspberrypi`
-- Or connect HDMI display directly
-- Or use terminal-only monitor: `python serial_monitor.py`
+Check wiring, power, SPI enablement, and the configured pins in `config.py`. The default expected chip ID is `3`, matching the Waveshare sample.
 
-### Module not found errors
+### GUI display issues over SSH
+
+Use a directly connected display or X11 forwarding. For hardware validation without a display, use:
 
 ```bash
-# Ensure venv is activated
-source .venv/bin/activate
-which python  # Should show .venv/bin/python
+python serial_monitor.py --rate 10 --channels 0 --count 10
 ```
 
-## File Structure
+### Non-Raspberry Pi testing
 
+Use mock mode:
+
+```bash
+python serial_monitor.py --mock --rate 5 --count 5
 ```
-raspi-voltmeter/
-├── main.py                 # Main application
-├── serial_monitor.py       # Terminal serial monitor (no GUI)
-├── config.py              # Configuration
-├── requirements.txt       # Python dependencies
-├── setup.sh              # Setup script (THIS FILE)
-├── hardware/
-│   └── adc.py           # ADC drivers (modify for your board)
-├── core/
-│   └── acquisition.py   # Data acquisition manager
-├── gui/
-│   ├── main_window.py   # PyQt UI
-│   └── chart.py         # Plotting helpers
-
-```
-
-## Support
-
-For issues:
-
-1. Check troubleshooting section above
-2. Verify I2C/SPI is enabled: `raspi-config` → Interface Options
-3. Run `python serial_monitor.py` to verify readings
-4. Check hardware connections and I2C address
