@@ -122,11 +122,11 @@ class MainWindow(QMainWindow):
         for g in gain_options:
             self.gain_combo.addItem(f"x{g}", g)
         self.gain_combo.currentIndexChanged.connect(self._change_gain)
-        self._set_current_gain()
         control_layout.addWidget(self.gain_combo)
 
         self.range_label = QLabel("Range: --")
         control_layout.addWidget(self.range_label)
+        self._set_current_gain()
         control_layout.addStretch()
 
         v.addLayout(control_layout)
