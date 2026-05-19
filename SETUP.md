@@ -42,19 +42,18 @@ i2cdetect -y 1
 sudo ls /dev/spi*
 ```
 
-### 3. Run demo with mock ADC
-
-```bash
-cd /path/to/raspi-voltmeter
-source .venv/bin/activate
-python tests/run_gui_demo.py
-```
-
-### 4. Run real application
+### 3. Run real application (GUI)
 
 ```bash
 source .venv/bin/activate
 python main.py
+```
+
+### 4. Run terminal-only monitor (no GUI)
+
+```bash
+source .venv/bin/activate
+python serial_monitor.py --rate 10 --channels 0
 ```
 
 ## Next: Implement ADC Driver
@@ -120,7 +119,7 @@ sudo reboot
 
 - Use X11 forwarding if SSH: `ssh -X user@raspberrypi`
 - Or connect HDMI display directly
-- Or run headless tests: `python tests/test_gui_smoke.py`
+- Or use terminal-only monitor: `python serial_monitor.py`
 
 ### Module not found errors
 
@@ -135,6 +134,7 @@ which python  # Should show .venv/bin/python
 ```
 raspi-voltmeter/
 ├── main.py                 # Main application
+├── serial_monitor.py       # Terminal serial monitor (no GUI)
 ├── config.py              # Configuration
 ├── requirements.txt       # Python dependencies
 ├── setup.sh              # Setup script (THIS FILE)
@@ -145,10 +145,7 @@ raspi-voltmeter/
 ├── gui/
 │   ├── main_window.py   # PyQt UI
 │   └── chart.py         # Plotting helpers
-└── tests/
-    ├── test_mock_acquisition.py  # Mock test
-    ├── test_gui_smoke.py         # GUI test
-    └── run_gui_demo.py           # Interactive demo
+
 ```
 
 ## Support
@@ -157,5 +154,5 @@ For issues:
 
 1. Check troubleshooting section above
 2. Verify I2C/SPI is enabled: `raspi-config` → Interface Options
-3. Run tests: `python tests/test_gui_smoke.py`
+3. Run `python serial_monitor.py` to verify readings
 4. Check hardware connections and I2C address

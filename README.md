@@ -7,6 +7,7 @@ Features:
 - Mock ADC for development without hardware
 - Background acquisition manager
 - PyQt6 UI with live plotting (pyqtgraph)
+- Terminal serial monitor (no GUI)
 
 Quick start (on Raspberry Pi or dev machine):
 
@@ -23,6 +24,18 @@ pip install -r requirements.txt
 
 ```bash
 python main.py
+```
+
+3. Run without GUI (serial monitor):
+
+```bash
+python serial_monitor.py --rate 10 --channels 0
+```
+
+Mock mode for testing on non-RPi:
+
+```bash
+python serial_monitor.py --mock --rate 5 --count 5
 ```
 
 Next steps:
