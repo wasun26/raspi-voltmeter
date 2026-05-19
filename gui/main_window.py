@@ -179,11 +179,13 @@ class MainWindow(QMainWindow):
             if len(self.acq.channels) == 1:
                 ch = self.acq.channels[0]
                 v = self._last.get(ch, 0.0)
-                self.voltage_label.setText(f"{v:.3f} V")
+                self.voltage_label.setText(self._format_voltage(v))
             else:
                 # Multi-channel: show all
                 values = " | ".join(
-                    f"CH{ch}: {self._last.get(ch, 0.0):.3f}V" for ch in self.acq.channels)
+                    f"CH{ch}: {self._format_voltage(self._last.get(ch, 0.0))}"
+                    for ch in self.acq.channels
+                )
                 self.voltage_label.setText(values)
 
             self.voltage_label.setStyleSheet(
@@ -250,11 +252,29 @@ class MainWindow(QMainWindow):
         gain = float(getattr(adc, "gain", 1))
         single_ended = bool(getattr(adc, "single_ended", True))
         full_scale = vref / max(gain, 1.0)
+        unit, scale, decimals = self._select_unit(full_scale)
+        fs_scaled = full_scale * scale
         if single_ended:
-            text = f"Range: 0.000-{full_scale:.3f} V"
+            text = f"Range: 0-{fs_scaled:.{decimals}f} {unit}"
         else:
-            text = f"Range: -{full_scale:.3f} to {full_scale:.3f} V"
+            text = f"Range: -{fs_scaled:.{decimals}f} to {fs_scaled:.{decimals}f} {unit}"
         self.range_label.setText(text)
+
+    def _select_unit(self, full_scale_v: float):
+        # Pick unit based on range from gain selection.
+        if full_scale_v <= 0.01:
+            return "uV", 1_000_000.0, 0
+        if full_scale_v <= 1.0:
+            return "mV", 1_000.0, 3
+        return "V", 1.0, 6
+
+    def _format_voltage(self, value_v: float) -> str:
+        adc = getattr(self.acq, "adc", None)
+        vref = float(getattr(adc, "vref", 2.5))
+        gain = float(getattr(adc, "gain", 1))
+        full_scale = vref / max(gain, 1.0)
+        unit, scale, decimals = self._select_unit(full_scale)
+        return f"{value_v * scale:.{decimals}f} {unit}"
 
     def _calc_maxlen(self) -> int:
         rate = float(getattr(self.acq, "sample_rate", 1.0))
