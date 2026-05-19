@@ -1,9 +1,15 @@
 DEFAULT = {
     "adc": {
-        "type": "mock",
+        "type": "auto",
         "i2c_address": 0x48,
         "spi_bus": 0,
         "spi_device": 0,
+        "drdy_pin": 17,
+        "reset_pin": 18,
+        "vref": 2.5,
+        "gain": 1,
+        "data_rate": 1000,
+        "single_ended": True,
     },
     "sample_rate": 20,
     "channels": [0],
