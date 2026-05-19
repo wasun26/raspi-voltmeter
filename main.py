@@ -22,10 +22,14 @@ def create_adc(adc_cfg):
                     spi_device=adc_cfg.get("spi_device", 0),
                     drdy_pin=adc_cfg.get("drdy_pin", 17),
                     reset_pin=adc_cfg.get("reset_pin", 18),
+                    cs_pin=adc_cfg.get("cs_pin", 22),
                     vref=adc_cfg.get("vref", 2.5),
                     gain=adc_cfg.get("gain", 1),
                     data_rate=adc_cfg.get("data_rate", 1000),
                     single_ended=adc_cfg.get("single_ended", True),
+                    spi_hz=adc_cfg.get("spi_hz", 20000),
+                    validate_chip_id=adc_cfg.get("validate_chip_id", True),
+                    expected_chip_id=adc_cfg.get("expected_chip_id", 3),
                 )
             except RuntimeError:
                 if adc_type == "ads1256":

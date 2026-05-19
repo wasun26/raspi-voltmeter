@@ -2,6 +2,7 @@
 import time
 import math
 import random
+from typing import Optional
 
 
 class AdcDevice:
@@ -150,7 +151,7 @@ class ADS1256(AdcDevice):
         30: 0x53,
         25: 0x43,
         15: 0x33,
-        10: 0x23,
+        10: 0x20,
         5: 0x13,
         2.5: 0x03,
     }
@@ -161,11 +162,14 @@ class ADS1256(AdcDevice):
         spi_device: int = 0,
         drdy_pin: int = 17,
         reset_pin: int = 18,
+        cs_pin: Optional[int] = 22,
         vref: float = 2.5,
         gain: int = 1,
         data_rate: float = 1000,
         single_ended: bool = True,
-        spi_hz: int = 1000000,
+        spi_hz: int = 20000,
+        validate_chip_id: bool = True,
+        expected_chip_id: int = 3,
     ):
         try:
             import spidev
@@ -179,20 +183,32 @@ class ADS1256(AdcDevice):
         self.gain = int(gain)
         self.data_rate = float(data_rate)
         self.single_ended = bool(single_ended)
+        self.cs_pin = cs_pin
+        self.expected_chip_id = int(expected_chip_id)
 
-        self.spi = spidev.SpiDev()
-        self.spi.open(spi_bus, spi_device)
+        self.spi = spidev.SpiDev(spi_bus, spi_device)
         self.spi.max_speed_hz = spi_hz
         self.spi.mode = 0x01
+        if self.cs_pin is not None:
+            self.spi.no_cs = True
 
         GPIO.setmode(GPIO.BCM)
-        GPIO.setup(drdy_pin, GPIO.IN)
+        GPIO.setwarnings(False)
+        GPIO.setup(drdy_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
         GPIO.setup(reset_pin, GPIO.OUT, initial=GPIO.HIGH)
+        if self.cs_pin is not None:
+            GPIO.setup(self.cs_pin, GPIO.OUT, initial=GPIO.HIGH)
 
         self.drdy_pin = drdy_pin
         self.reset_pin = reset_pin
 
         self._reset()
+        if validate_chip_id:
+            chip_id = self.read_chip_id()
+            if chip_id != self.expected_chip_id:
+                raise RuntimeError(
+                    f"ADS1256 chip ID mismatch: expected {self.expected_chip_id}, got {chip_id}"
+                )
         self._configure()
 
     def set_gain(self, gain: int):
@@ -202,13 +218,19 @@ class ADS1256(AdcDevice):
         self.gain = gain
         self._configure()
 
+    def set_sample_rate(self, rate_hz: float):
+        rate = float(rate_hz)
+        closest = min(self.DRATE_MAP, key=lambda item: abs(float(item) - rate))
+        self.data_rate = float(closest)
+        self._configure()
+
     def _reset(self):
-        self.GPIO.output(self.reset_pin, self.GPIO.LOW)
-        time.sleep(0.01)
         self.GPIO.output(self.reset_pin, self.GPIO.HIGH)
-        time.sleep(0.05)
-        self.spi.xfer2([self.CMD_RESET])
-        time.sleep(0.05)
+        time.sleep(0.2)
+        self.GPIO.output(self.reset_pin, self.GPIO.LOW)
+        time.sleep(0.2)
+        self.GPIO.output(self.reset_pin, self.GPIO.HIGH)
+        time.sleep(0.2)
 
     def _wait_drdy(self, timeout: float = 1.0):
         start = time.time()
@@ -217,27 +239,61 @@ class ADS1256(AdcDevice):
                 raise TimeoutError("ADS1256 DRDY timeout")
             time.sleep(0.0005)
 
+    def _cs_low(self):
+        if self.cs_pin is not None:
+            self.GPIO.output(self.cs_pin, self.GPIO.LOW)
+
+    def _cs_high(self):
+        if self.cs_pin is not None:
+            self.GPIO.output(self.cs_pin, self.GPIO.HIGH)
+
+    def _writebytes(self, data):
+        self._cs_low()
+        try:
+            self.spi.writebytes(data)
+        finally:
+            self._cs_high()
+
     def _write_reg(self, reg: int, value: int):
-        self.spi.xfer2([self.CMD_WREG | reg, 0x00, value & 0xFF])
+        self._writebytes([self.CMD_WREG | reg, 0x00, value & 0xFF])
+        time.sleep(0.001)
+
+    def _write_regs(self, start_reg: int, values):
+        self._cs_low()
+        try:
+            self.spi.writebytes([self.CMD_WREG | start_reg, len(values) - 1])
+            self.spi.writebytes([v & 0xFF for v in values])
+        finally:
+            self._cs_high()
         time.sleep(0.001)
 
     def _read_reg(self, reg: int) -> int:
-        self.spi.xfer2([self.CMD_RREG | reg, 0x00])
-        time.sleep(0.001)
-        return self.spi.xfer2([0xFF])[0]
+        self._cs_low()
+        try:
+            self.spi.writebytes([self.CMD_RREG | reg, 0x00])
+            time.sleep(0.001)
+            return self.spi.readbytes(1)[0]
+        finally:
+            self._cs_high()
+
+    def read_chip_id(self) -> int:
+        self._wait_drdy()
+        return self._read_reg(self.REG_STATUS) >> 4
 
     def _configure(self):
         gain_code = self.GAIN_MAP.get(self.gain, 0x00)
         rate_code = self.DRATE_MAP.get(self.data_rate, 0xA1)
 
-        # STATUS: enable buffer (bit 1) for better input impedance
-        self._write_reg(self.REG_STATUS, 0x02)
-        # MUX: default AIN0-AINCOM
-        self._write_reg(self.REG_MUX, 0x08)
-        # ADCON: gain setting
-        self._write_reg(self.REG_ADCON, gain_code)
-        # DRATE: data rate
-        self._write_reg(self.REG_DRATE, rate_code)
+        # Match Waveshare defaults: STATUS auto-calibration on, buffer off.
+        self._write_regs(
+            self.REG_STATUS,
+            [
+                (0 << 3) | (1 << 2) | (0 << 1),
+                0x08,
+                (0 << 5) | (0 << 3) | gain_code,
+                rate_code,
+            ],
+        )
 
     def _set_channel(self, channel):
         if isinstance(channel, (tuple, list)) and len(channel) == 2:
@@ -251,16 +307,20 @@ class ADS1256(AdcDevice):
                 mux = ((ch & 0x07) << 4) | 0x00
 
         self._write_reg(self.REG_MUX, mux)
-        self.spi.xfer2([self.CMD_SYNC])
+        self._writebytes([self.CMD_SYNC])
         time.sleep(0.001)
-        self.spi.xfer2([self.CMD_WAKEUP])
+        self._writebytes([self.CMD_WAKEUP])
         time.sleep(0.001)
 
     def _read_raw(self) -> int:
         self._wait_drdy()
-        self.spi.xfer2([self.CMD_RDATA])
-        time.sleep(0.001)
-        data = self.spi.xfer2([0xFF, 0xFF, 0xFF])
+        self._cs_low()
+        try:
+            self.spi.writebytes([self.CMD_RDATA])
+            time.sleep(0.001)
+            data = self.spi.readbytes(3)
+        finally:
+            self._cs_high()
         raw = (data[0] << 16) | (data[1] << 8) | data[2]
         if raw & 0x800000:
             raw -= 1 << 24

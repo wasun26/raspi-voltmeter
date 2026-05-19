@@ -23,15 +23,31 @@ def create_adc(adc_cfg, use_mock: bool):
 
     adc_type = adc_cfg.get("type", "auto")
     if adc_type in ("ads1256", "auto") and ADS1256 is not None:
-        return ADS1256(
-            spi_bus=adc_cfg.get("spi_bus", 0),
-            spi_device=adc_cfg.get("spi_device", 0),
-            drdy_pin=adc_cfg.get("drdy_pin", 17),
-            reset_pin=adc_cfg.get("reset_pin", 18),
+        try:
+            return ADS1256(
+                spi_bus=adc_cfg.get("spi_bus", 0),
+                spi_device=adc_cfg.get("spi_device", 0),
+                drdy_pin=adc_cfg.get("drdy_pin", 17),
+                reset_pin=adc_cfg.get("reset_pin", 18),
+                cs_pin=adc_cfg.get("cs_pin", 22),
+                vref=adc_cfg.get("vref", 2.5),
+                gain=adc_cfg.get("gain", 1),
+                data_rate=adc_cfg.get("data_rate", 1000),
+                single_ended=adc_cfg.get("single_ended", True),
+                spi_hz=adc_cfg.get("spi_hz", 20000),
+                validate_chip_id=adc_cfg.get("validate_chip_id", True),
+                expected_chip_id=adc_cfg.get("expected_chip_id", 3),
+            )
+        except RuntimeError:
+            if adc_type == "ads1256":
+                raise
+
+    if adc_type in ("mock", "auto"):
+        return MockAdc(
             vref=adc_cfg.get("vref", 2.5),
             gain=adc_cfg.get("gain", 1),
-            data_rate=adc_cfg.get("data_rate", 1000),
             single_ended=adc_cfg.get("single_ended", True),
+            sample_rate=adc_cfg.get("sample_rate", 20),
         )
 
     raise RuntimeError(
