@@ -40,6 +40,8 @@ def create_adc(adc_cfg):
 
     if adc_type in ("mock", "auto"):
         return MockAdc(
+            amplitude=adc_cfg.get("mock_amplitude", 1.5),
+            offset=adc_cfg.get("mock_offset", 1.5),
             vref=adc_cfg.get("vref", 2.5),
             gain=adc_cfg.get("gain", 1),
             single_ended=adc_cfg.get("single_ended", True),

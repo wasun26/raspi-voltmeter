@@ -144,7 +144,7 @@ class MainWindow(QMainWindow):
         for i, ch in enumerate(self.acq.channels):
             pen = pg.mkPen(color=colors[i % len(colors)], width=2)
             self.curves[ch] = self.plot_widget.plot(
-                pen=pen, name=f"Channel {ch}")
+                pen=pen, name=self._format_channel(ch))
 
     def _on_data(self, ts, readings):
         if isinstance(readings, Exception):
@@ -183,7 +183,7 @@ class MainWindow(QMainWindow):
             else:
                 # Multi-channel: show all
                 values = " | ".join(
-                    f"CH{ch}: {self._format_voltage(self._last.get(ch, 0.0))}"
+                    f"{self._format_channel(ch)}: {self._format_voltage(self._last.get(ch, 0.0))}"
                     for ch in self.acq.channels
                 )
                 self.voltage_label.setText(values)
@@ -252,6 +252,8 @@ class MainWindow(QMainWindow):
         gain = float(getattr(adc, "gain", 1))
         single_ended = bool(getattr(adc, "single_ended", True))
         full_scale = vref / max(gain, 1.0)
+        if not single_ended:
+            full_scale *= 2.0
         unit, scale, decimals = self._select_unit(full_scale)
         fs_scaled = full_scale * scale
         if single_ended:
@@ -265,16 +267,24 @@ class MainWindow(QMainWindow):
         if full_scale_v <= 0.01:
             return "uV", 1_000_000.0, 0
         if full_scale_v <= 1.0:
-            return "mV", 1_000.0, 3
+            return "mV", 1_000.0, 4
         return "V", 1.0, 6
 
     def _format_voltage(self, value_v: float) -> str:
         adc = getattr(self.acq, "adc", None)
         vref = float(getattr(adc, "vref", 2.5))
         gain = float(getattr(adc, "gain", 1))
+        single_ended = bool(getattr(adc, "single_ended", True))
         full_scale = vref / max(gain, 1.0)
+        if not single_ended:
+            full_scale *= 2.0
         unit, scale, decimals = self._select_unit(full_scale)
         return f"{value_v * scale:.{decimals}f} {unit}"
+
+    def _format_channel(self, channel) -> str:
+        if isinstance(channel, (tuple, list)) and len(channel) == 2:
+            return f"AD{channel[0]}-AD{channel[1]}"
+        return f"CH{channel}"
 
     def _calc_maxlen(self) -> int:
         rate = float(getattr(self.acq, "sample_rate", 1.0))

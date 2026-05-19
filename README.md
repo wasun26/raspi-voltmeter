@@ -6,7 +6,7 @@ Simple Raspberry Pi voltmeter application with a PyQt6 GUI, live plotting, a ter
 
 The implemented real ADC driver targets the Waveshare ADS1256-based High-Precision AD/DA board.
 
-Default ADS1256 settings are kept close to the Waveshare Python sample:
+The default application mode is tuned for low-level millivolt differential measurement from a concrete resistance measurement instrument:
 
 - SPI library: `spidev`
 - GPIO library: `RPi.GPIO`
@@ -17,9 +17,10 @@ Default ADS1256 settings are kept close to the Waveshare Python sample:
 - RESET pin: BCM `18`
 - Manual CS pin: BCM `22`
 - Expected ADS1256 chip ID: `3`
-- ADC data rate: `1000` SPS by default
+- Input mode: differential `AD0-AD1`
+- PGA gain: `64`
+- ADC data rate: `30` SPS by default
 - Vref: `2.5` V
-- Gain: `1`
 
 Configuration lives in `config.py`.
 
@@ -73,7 +74,7 @@ python serial_monitor.py --mock --rate 5 --count 5
 Run terminal monitor against ADS1256 or fallback mock in `auto` mode:
 
 ```bash
-python serial_monitor.py --rate 10 --channels 0 --count 10
+python serial_monitor.py --rate 30 --channels 0-1 --count 10
 ```
 
 Run the GUI:
@@ -107,4 +108,28 @@ raspi-voltmeter/
 - `requirements.txt` intentionally contains portable GUI/data packages only.
 - On Raspberry Pi OS, install `spidev` and `RPi.GPIO` through system packages or the provided `setup.sh`.
 - The ADS1256 path requires real Raspberry Pi GPIO/SPI access.
+- Voltage conversion in differential mode uses `Voltage = Raw_Data * 2 * VREF / (8388607 * GAIN)`.
 - Keep hardware-specific changes inside `hardware/`.
+
+## Wiring For mV Differential Measurement
+
+Connect the concrete resistance measurement instrument voltage output to the ADS1256 differential input:
+
+| Signal | Waveshare terminal |
+| --- | --- |
+| Positive voltage output | `AD0` / `AIN0` |
+| Negative voltage output | `AD1` / `AIN1` |
+| Reference/common shield, if required by the instrument | instrument manual dependent |
+
+Raspberry Pi to Waveshare board signals are provided through the 40-pin header. The relevant ADS1256 pins are:
+
+| ADS1256 signal | Raspberry Pi BCM |
+| --- | ---: |
+| `DRDY` | 17 |
+| `RESET` | 18 |
+| `CS0` | 22 |
+| `DIN` / MOSI | 10 |
+| `DOUT` / MISO | 9 |
+| `SCK` | 11 |
+
+Do not connect the measured differential pair directly to Raspberry Pi GPIO pins. Connect it only to the ADS1256 analog inputs. Keep the signal leads short and twisted where possible to reduce noise.

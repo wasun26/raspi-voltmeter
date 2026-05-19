@@ -20,6 +20,12 @@ Guidelines for automated agents working in this repository.
   - DRDY on BCM `17` with `GPIO.PUD_UP`
   - RESET on BCM `18`
   - SPI speed `20000` Hz and mode `0b01`
+- Default measurement mode is low-level differential mV:
+  - channel `AD0-AD1`
+  - `gain = 64`
+  - `data_rate = 30`
+  - `single_ended = False`
+  - conversion formula `Raw_Data * 2 * VREF / (8388607 * GAIN)`
 - Keep mock behavior available for non-Raspberry Pi environments.
 
 ## Coding Conventions
@@ -42,7 +48,7 @@ python serial_monitor.py --mock --rate 5 --count 5
 - Use auto mode on Raspberry Pi OS to validate ADS1256 while preserving mock fallback:
 
 ```bash
-python serial_monitor.py --rate 10 --channels 0 --count 10
+python serial_monitor.py --rate 30 --channels 0-1 --count 10
 ```
 
 ## Notes

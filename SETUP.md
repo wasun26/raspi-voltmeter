@@ -11,7 +11,7 @@ Setup instructions for Raspberry Pi OS and development machines.
 - ADS1256 board wired to the configured GPIO pins
 - Internet connection for package installation
 
-Default ADS1256 wiring/configuration:
+Default ADS1256 wiring/configuration for the Raspberry Pi side:
 
 | Signal | BCM pin |
 | --- | ---: |
@@ -19,6 +19,15 @@ Default ADS1256 wiring/configuration:
 | RESET | 18 |
 | CS | 22 |
 | SPI bus/device | 0 / 0 |
+
+Default analog input wiring for the concrete resistance measurement instrument:
+
+| Instrument output | Waveshare ADS1256 input |
+| --- | --- |
+| Positive mV signal | `AD0` / `AIN0` |
+| Negative mV signal | `AD1` / `AIN1` |
+
+The application reads this as differential `AD0-AD1`, with `GAIN=64` and `30 SPS`.
 
 ### Quick Setup
 
@@ -46,7 +55,7 @@ ls /dev/spi*
 Run the terminal monitor:
 
 ```bash
-python serial_monitor.py --rate 10 --channels 0 --count 10
+python serial_monitor.py --rate 30 --channels 0-1 --count 10
 ```
 
 Run the GUI:
@@ -111,15 +120,23 @@ Important ADS1256 fields:
     "cs_pin": 22,
     "spi_hz": 20000,
     "vref": 2.5,
-    "gain": 1,
-    "data_rate": 1000,
-    "single_ended": True,
+    "gain": 64,
+    "data_rate": 30,
+    "single_ended": False,
     "validate_chip_id": True,
     "expected_chip_id": 3,
 }
 ```
 
 Use `"type": "mock"` to force mock mode. Use `"type": "ads1256"` to require real hardware and fail if the ADS1256 cannot initialize.
+
+The default channel list is:
+
+```python
+"channels": [(0, 1)]
+```
+
+This means differential `AD0-AD1`.
 
 ## Troubleshooting
 
@@ -148,12 +165,22 @@ sudo reboot
 
 Check wiring, power, SPI enablement, and the configured pins in `config.py`. The default expected chip ID is `3`, matching the Waveshare sample.
 
+### Reading clips or stays near range limit
+
+With `VREF=2.5V` and `GAIN=64`, the differential full-scale range is approximately:
+
+```text
++/-78.125 mV
+```
+
+If the measured signal can exceed this range, reduce gain to `32`, `16`, or `8` in `config.py`.
+
 ### GUI display issues over SSH
 
 Use a directly connected display or X11 forwarding. For hardware validation without a display, use:
 
 ```bash
-python serial_monitor.py --rate 10 --channels 0 --count 10
+python serial_monitor.py --rate 30 --channels 0-1 --count 10
 ```
 
 ### Non-Raspberry Pi testing

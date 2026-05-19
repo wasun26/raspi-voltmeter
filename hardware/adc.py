@@ -69,6 +69,8 @@ class MockAdc(AdcDevice):
 
     def _quantize(self, value: float) -> float:
         full_scale = self.vref / max(self.gain, 1)
+        if not self.single_ended:
+            full_scale *= 2.0
         if self.single_ended:
             value = max(0.0, min(full_scale, value))
         else:
@@ -330,4 +332,6 @@ class ADS1256(AdcDevice):
         self._set_channel(channel)
         raw = self._read_raw()
         full_scale = 0x7FFFFF
-        return (raw / full_scale) * (self.vref / self.gain)
+        if self.single_ended:
+            return (raw / full_scale) * (self.vref / self.gain)
+        return (raw * 2.0 * self.vref) / (full_scale * self.gain)
