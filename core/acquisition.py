@@ -25,6 +25,7 @@ class AcquisitionManager:
         if self._running:
             return
         self._running = True
+        self.set_sample_rate(self.sample_rate)
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
@@ -33,13 +34,21 @@ class AcquisitionManager:
         if self._thread:
             self._thread.join(timeout=1.0)
 
+    def set_sample_rate(self, rate_hz: float):
+        self.sample_rate = float(rate_hz)
+        if hasattr(self.adc, "set_sample_rate"):
+            try:
+                self.adc.set_sample_rate(self.sample_rate)
+            except Exception:
+                pass
+
     def _run(self):
-        period = 1.0 / self.sample_rate if self.sample_rate > 0 else 0.1
         while self._running:
+            period = 1.0 / self.sample_rate if self.sample_rate > 0 else 0.1
             ts = time.time()
             readings = {}
             error = None
-            
+
             try:
                 for ch in self.channels:
                     if self.averaging <= 1:

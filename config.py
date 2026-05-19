@@ -14,4 +14,8 @@ DEFAULT = {
     "sample_rate": 20,
     "channels": [0],
     "averaging": 1,
+    "plot_window_sec": 60,
+    "plot_max_points": 2000,
+    "log_enabled": True,
+    "log_dir": "logs",
 }

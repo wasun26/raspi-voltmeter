@@ -31,16 +31,23 @@ def create_adc(adc_cfg):
                 if adc_type == "ads1256":
                     raise
         if adc_type == "ads1256":
-            raise RuntimeError("ADS1256 driver requires spidev and RPi.GPIO on Raspberry Pi OS")
+            raise RuntimeError(
+                "ADS1256 driver requires spidev and RPi.GPIO on Raspberry Pi OS")
 
     if adc_type in ("mock", "auto"):
-        return MockAdc()
+        return MockAdc(
+            vref=adc_cfg.get("vref", 2.5),
+            gain=adc_cfg.get("gain", 1),
+            single_ended=adc_cfg.get("single_ended", True),
+            sample_rate=DEFAULT.get("sample_rate", 20),
+        )
 
     raise ValueError(f"Unsupported ADC type: {adc_type}")
 
 
 def main():
     adc = create_adc(DEFAULT.get("adc", {}))
+    print(f"[main] ADC in use: {adc.__class__.__name__}")
     acq = AcquisitionManager(
         adc_device=adc,
         channels=DEFAULT.get("channels", [0]),
@@ -48,8 +55,16 @@ def main():
         averaging=DEFAULT.get("averaging", 1),
     )
 
+    print("[main] Before QApplication()")
     app = QApplication(sys.argv)
-    win = MainWindow(acquisition_manager=acq)
+    print("[main] After QApplication()")
+    win = MainWindow(
+        acquisition_manager=acq,
+        plot_window_sec=DEFAULT.get("plot_window_sec", 60),
+        plot_max_points=DEFAULT.get("plot_max_points", 2000),
+        log_enabled=DEFAULT.get("log_enabled", True),
+        log_dir=DEFAULT.get("log_dir", "logs"),
+    )
     win.show()
 
     acq.start()

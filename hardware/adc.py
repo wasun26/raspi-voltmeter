@@ -13,48 +13,102 @@ class AdcDevice:
 
 
 class MockAdc(AdcDevice):
-    """Mock ADC emitting a low-frequency sine wave plus small noise.
-    
-    Can simulate error conditions for testing error handling.
+    """Mock ADC that behaves closer to real hardware.
+
+    - Holds last sample if read faster than sample rate
+    - Quantizes to 24-bit resolution
+    - Can simulate communication errors
     """
 
-    def __init__(self, amplitude: float = 1.5, offset: float = 1.5, freq: float = 0.25,
-                 error_mode: str = "normal", error_rate: float = 0.0):
+    def __init__(
+        self,
+        amplitude: float = 1.5,
+        offset: float = 1.5,
+        freq: float = 0.25,
+        error_mode: str = "normal",
+        error_rate: float = 0.0,
+        vref: float = 2.5,
+        gain: int = 1,
+        single_ended: bool = True,
+        sample_rate: float = 1000.0,
+    ):
         """Initialize mock ADC.
-        
+
         Args:
             amplitude: Sine wave amplitude (V)
             offset: DC offset (V)
             freq: Sine wave frequency (Hz)
             error_mode: "normal", "always_error", "random", or "stuck"
             error_rate: For random mode, probability of error (0.0-1.0)
+            vref: Reference voltage (V)
+            gain: PGA gain
+            single_ended: Clamp to 0..Vref/gain when True
+            sample_rate: Sample rate used to hold last value between conversions
         """
         self.amp = amplitude
         self.offset = offset
         self.freq = freq
         self.error_mode = error_mode.lower()
         self.error_rate = error_rate
+        self.vref = float(vref)
+        self.gain = int(gain)
+        self.single_ended = bool(single_ended)
+        self.sample_rate = float(sample_rate)
+
         self._t0 = time.time()
         self._error_counter = 0
+        self._last_sample_time = 0.0
+        self._last_value = self.offset
+
+    def set_sample_rate(self, rate_hz: float):
+        self.sample_rate = float(rate_hz)
+
+    def set_gain(self, gain: int):
+        self.gain = int(gain)
+
+    def _quantize(self, value: float) -> float:
+        full_scale = self.vref / max(self.gain, 1)
+        if self.single_ended:
+            value = max(0.0, min(full_scale, value))
+        else:
+            value = max(-full_scale, min(full_scale, value))
+
+        # 24-bit signed range for ADS1256
+        full_scale_counts = 0x7FFFFF
+        counts = int(round((value / full_scale) * full_scale_counts))
+        return (counts / full_scale_counts) * full_scale
+
+    def _generate_sample(self) -> float:
+        t = time.time() - self._t0
+        noise = (random.random() - 0.5) * 0.005
+        return self.offset + self.amp * math.sin(2 * math.pi * self.freq * t) + noise
 
     def read_voltage(self, channel: int = 0) -> float:
         """Read voltage, possibly with simulated error."""
-        # Check error conditions
         if self.error_mode == "always_error":
             self._error_counter += 1
-            raise IOError(f"ADC Hardware Error (simulated) on channel {channel}")
-        
+            raise IOError(
+                f"ADC Hardware Error (simulated) on channel {channel}")
+
         if self.error_mode == "random" and random.random() < self.error_rate:
             self._error_counter += 1
-            raise IOError(f"ADC Communication Error (simulated, #{self._error_counter})")
-        
+            raise IOError(
+                f"ADC Communication Error (simulated, #{self._error_counter})")
+
         if self.error_mode == "stuck":
-            # Return a stuck value
-            return self.offset
-        
-        # Normal operation: sine wave + noise
-        t = time.time() - self._t0
-        return self.offset + self.amp * math.sin(2 * math.pi * self.freq * t) + (random.random() - 0.5) * 0.005
+            return self._quantize(self.offset)
+
+        now = time.time()
+        if self.sample_rate > 0:
+            interval = 1.0 / self.sample_rate
+            if now - self._last_sample_time < interval:
+                return self._last_value
+
+        value = self._generate_sample()
+        quantized = self._quantize(value)
+        self._last_value = quantized
+        self._last_sample_time = now
+        return quantized
 
 
 class ADS1256(AdcDevice):
@@ -117,7 +171,8 @@ class ADS1256(AdcDevice):
             import spidev
             import RPi.GPIO as GPIO
         except Exception as exc:
-            raise RuntimeError("ADS1256 requires spidev and RPi.GPIO on Raspberry Pi OS") from exc
+            raise RuntimeError(
+                "ADS1256 requires spidev and RPi.GPIO on Raspberry Pi OS") from exc
 
         self.GPIO = GPIO
         self.vref = float(vref)
@@ -138,6 +193,13 @@ class ADS1256(AdcDevice):
         self.reset_pin = reset_pin
 
         self._reset()
+        self._configure()
+
+    def set_gain(self, gain: int):
+        gain = int(gain)
+        if gain not in self.GAIN_MAP:
+            raise ValueError(f"Unsupported gain: {gain}")
+        self.gain = gain
         self._configure()
 
     def _reset(self):
