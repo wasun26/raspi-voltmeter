@@ -42,11 +42,11 @@ Write-Host "✓ Setup complete!" -ForegroundColor Green
 Write-Host "==========================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Cyan
-Write-Host "1. Run demo (mock ADC):"
-Write-Host "   python tests\run_gui_demo.py"
+Write-Host "1. Run terminal monitor with mock ADC:"
+Write-Host "   python serial_monitor.py --mock --rate 5 --count 5"
 Write-Host ""
-Write-Host "2. Run smoke test:"
-Write-Host "   python tests\test_gui_smoke.py"
+Write-Host "2. Run the GUI:"
+Write-Host "   python main.py"
 Write-Host ""
 Write-Host "3. To run on Raspberry Pi, copy project folder and:"
 Write-Host "   bash setup.sh"

@@ -16,9 +16,9 @@ from PyQt6.QtWidgets import (
     QSpinBox,
     QVBoxLayout,
     QWidget,
-    QGridLayout,
 )
-import pyqtgraph as pg
+
+from gui.chart import create_plot_widget, make_pen
 
 
 class MainWindow(QMainWindow):
@@ -132,7 +132,7 @@ class MainWindow(QMainWindow):
         v.addLayout(control_layout)
 
         # Plot
-        self.plot_widget = pg.PlotWidget()
+        self.plot_widget = create_plot_widget()
         self.plot_widget.setLabel("left", "Voltage", units="V")
         self.plot_widget.setLabel("bottom", "Time", units="s")
         self.plot_widget.setTitle("Voltage Trend")
@@ -142,7 +142,7 @@ class MainWindow(QMainWindow):
         colors = ["#FF5722", "#2196F3", "#4CAF50",
                   "#FFC107", "#9C27B0", "#00BCD4"]
         for i, ch in enumerate(self.acq.channels):
-            pen = pg.mkPen(color=colors[i % len(colors)], width=2)
+            pen = make_pen(color=colors[i % len(colors)], width=2)
             self.curves[ch] = self.plot_widget.plot(
                 pen=pen, name=self._format_channel(ch))
 
