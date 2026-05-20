@@ -55,7 +55,7 @@ ls /dev/spi*
 Run the terminal monitor:
 
 ```bash
-python serial_monitor.py --rate 30 --channels 0-1 --count 10
+python serial_monitor.py --adc ads1256 --rate 30 --channels 0-1 --count 10
 ```
 
 Run the GUI:
@@ -129,6 +129,12 @@ Important ADS1256 fields:
 ```
 
 Use `"type": "mock"` to force mock mode. Use `"type": "ads1256"` to require real hardware and fail if the ADS1256 cannot initialize.
+
+You can also force real hardware from the terminal without editing `config.py`:
+
+```bash
+python serial_monitor.py --adc ads1256 --rate 30 --channels 0-1 --count 10
+```
 
 The default channel list is:
 

@@ -47,7 +47,7 @@ After reboot:
 
 ```bash
 source .venv/bin/activate
-python serial_monitor.py --rate 10 --channels 0 --count 10
+python serial_monitor.py --adc ads1256 --rate 30 --channels 0-1 --count 10
 python main.py
 ```
 
@@ -69,6 +69,12 @@ Run terminal monitor with mock ADC:
 
 ```bash
 python serial_monitor.py --mock --rate 5 --count 5
+```
+
+Run terminal monitor against ADS1256 and fail clearly if hardware cannot initialize:
+
+```bash
+python serial_monitor.py --adc ads1256 --rate 30 --channels 0-1 --count 10
 ```
 
 Run terminal monitor against ADS1256 or fallback mock in `auto` mode:

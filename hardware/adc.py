@@ -182,8 +182,8 @@ class ADS1256(AdcDevice):
 
         self.GPIO = GPIO
         self.vref = float(vref)
-        self.gain = int(gain)
-        self.data_rate = float(data_rate)
+        self.gain = self._validate_gain(gain)
+        self.data_rate = self._closest_data_rate(data_rate)
         self.single_ended = bool(single_ended)
         self.cs_pin = cs_pin
         self.expected_chip_id = int(expected_chip_id)
@@ -214,17 +214,26 @@ class ADS1256(AdcDevice):
         self._configure()
 
     def set_gain(self, gain: int):
+        self.gain = self._validate_gain(gain)
+        self._configure()
+
+    def _validate_gain(self, gain: int) -> int:
         gain = int(gain)
         if gain not in self.GAIN_MAP:
             raise ValueError(f"Unsupported gain: {gain}")
-        self.gain = gain
+        return gain
+
+    def _closest_data_rate(self, rate_hz: float) -> float:
+        rate = float(rate_hz)
+        closest = min(self.DRATE_MAP, key=lambda item: abs(float(item) - rate))
+        return float(closest)
+
+    def set_data_rate(self, rate_hz: float):
+        self.data_rate = self._closest_data_rate(rate_hz)
         self._configure()
 
     def set_sample_rate(self, rate_hz: float):
-        rate = float(rate_hz)
-        closest = min(self.DRATE_MAP, key=lambda item: abs(float(item) - rate))
-        self.data_rate = float(closest)
-        self._configure()
+        self.set_data_rate(rate_hz)
 
     def _reset(self):
         self.GPIO.output(self.reset_pin, self.GPIO.HIGH)
@@ -335,3 +344,13 @@ class ADS1256(AdcDevice):
         if self.single_ended:
             return (raw / full_scale) * (self.vref / self.gain)
         return (raw * 2.0 * self.vref) / (full_scale * self.gain)
+
+    def close(self):
+        try:
+            self.spi.close()
+        except Exception:
+            pass
+        try:
+            self.GPIO.cleanup()
+        except Exception:
+            pass

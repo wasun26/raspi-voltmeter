@@ -1,4 +1,4 @@
-"""Terminal serial monitor for Raspberry Pi OS (ADS1256) or mock ADC."""
+"""Terminal monitor for Raspberry Pi OS ADS1256 hardware or mock ADC."""
 import argparse
 import sys
 import time
@@ -12,50 +12,66 @@ except Exception:
     ADS1256 = None
 
 
-def create_adc(adc_cfg, use_mock: bool):
-    if use_mock:
-        return MockAdc(
-            amplitude=adc_cfg.get("mock_amplitude", 1.5),
-            offset=adc_cfg.get("mock_offset", 1.5),
-            vref=adc_cfg.get("vref", 2.5),
-            gain=adc_cfg.get("gain", 1),
-            single_ended=adc_cfg.get("single_ended", True),
-            sample_rate=adc_cfg.get("sample_rate", 20),
-        )
+def create_mock_adc(adc_cfg):
+    return MockAdc(
+        amplitude=adc_cfg.get("mock_amplitude", 1.5),
+        offset=adc_cfg.get("mock_offset", 1.5),
+        vref=adc_cfg.get("vref", 2.5),
+        gain=adc_cfg.get("gain", 1),
+        single_ended=adc_cfg.get("single_ended", True),
+        sample_rate=adc_cfg.get("sample_rate", 20),
+    )
 
+
+def create_ads1256(adc_cfg):
+    if ADS1256 is None:
+        raise RuntimeError("ADS1256 driver requires spidev and RPi.GPIO on Raspberry Pi OS")
+
+    return ADS1256(
+        spi_bus=adc_cfg.get("spi_bus", 0),
+        spi_device=adc_cfg.get("spi_device", 0),
+        drdy_pin=adc_cfg.get("drdy_pin", 17),
+        reset_pin=adc_cfg.get("reset_pin", 18),
+        cs_pin=adc_cfg.get("cs_pin", 22),
+        vref=adc_cfg.get("vref", 2.5),
+        gain=adc_cfg.get("gain", 1),
+        data_rate=adc_cfg.get("data_rate", 1000),
+        single_ended=adc_cfg.get("single_ended", True),
+        spi_hz=adc_cfg.get("spi_hz", 20000),
+        validate_chip_id=adc_cfg.get("validate_chip_id", True),
+        expected_chip_id=adc_cfg.get("expected_chip_id", 3),
+    )
+
+
+def create_adc(adc_cfg):
     adc_type = adc_cfg.get("type", "auto")
-    if adc_type in ("ads1256", "auto") and ADS1256 is not None:
+    if adc_type in ("mock", "auto", "ads1256"):
+        pass
+    else:
+        raise ValueError(f"Unsupported ADC type: {adc_type}")
+
+    if adc_type == "mock":
+        return create_mock_adc(adc_cfg), None
+
+    if adc_type == "ads1256":
         try:
-            return ADS1256(
-                spi_bus=adc_cfg.get("spi_bus", 0),
-                spi_device=adc_cfg.get("spi_device", 0),
-                drdy_pin=adc_cfg.get("drdy_pin", 17),
-                reset_pin=adc_cfg.get("reset_pin", 18),
-                cs_pin=adc_cfg.get("cs_pin", 22),
-                vref=adc_cfg.get("vref", 2.5),
-                gain=adc_cfg.get("gain", 1),
-                data_rate=adc_cfg.get("data_rate", 1000),
-                single_ended=adc_cfg.get("single_ended", True),
-                spi_hz=adc_cfg.get("spi_hz", 20000),
-                validate_chip_id=adc_cfg.get("validate_chip_id", True),
-                expected_chip_id=adc_cfg.get("expected_chip_id", 3),
-            )
-        except RuntimeError:
-            if adc_type == "ads1256":
-                raise
+            return create_ads1256(adc_cfg), None
+        except Exception as exc:
+            raise RuntimeError(f"ADS1256 initialization failed: {exc}") from exc
 
-    if adc_type in ("mock", "auto"):
-        return MockAdc(
-            amplitude=adc_cfg.get("mock_amplitude", 1.5),
-            offset=adc_cfg.get("mock_offset", 1.5),
-            vref=adc_cfg.get("vref", 2.5),
-            gain=adc_cfg.get("gain", 1),
-            single_ended=adc_cfg.get("single_ended", True),
-            sample_rate=adc_cfg.get("sample_rate", 20),
-        )
+    try:
+        return create_ads1256(adc_cfg), None
+    except Exception as exc:
+        return create_mock_adc(adc_cfg), exc
 
-    raise RuntimeError(
-        "ADS1256 requires spidev and RPi.GPIO on Raspberry Pi OS")
+
+def parse_bool(value: str) -> bool:
+    text = value.strip().lower()
+    if text in ("1", "true", "yes", "on"):
+        return True
+    if text in ("0", "false", "no", "off"):
+        return False
+    raise argparse.ArgumentTypeError("expected true/false")
 
 
 def select_unit(full_scale_v: float, unit: str):
@@ -94,6 +110,8 @@ def main():
         description="Serial monitor for ADC readings")
     parser.add_argument(
         "--rate", type=float, default=DEFAULT.get("sample_rate", 20), help="Sample rate (Hz)")
+    parser.add_argument("--adc", choices=["auto", "ads1256", "mock"], default=None,
+                        help="ADC backend. ads1256 requires real Raspberry Pi hardware; auto falls back to mock.")
     default_channels = DEFAULT.get("channels", [0])
     default_channels_text = ",".join(
         f"{ch[0]}-{ch[1]}" if isinstance(ch, (tuple, list)) and len(ch) == 2 else str(ch)
@@ -106,18 +124,52 @@ def main():
     parser.add_argument("--unit", type=str, default="auto", choices=["auto", "V", "mV", "uV"],
                         help="Display unit")
     parser.add_argument("--mock", action="store_true",
-                        help="Force MockAdc (for non-RPi testing)")
+                        help="Force MockAdc (same as --adc mock)")
+    parser.add_argument("--gain", type=int, default=None,
+                        help="PGA gain override, for example 1, 2, 4, 8, 16, 32, 64")
+    parser.add_argument("--data-rate", type=float, default=None,
+                        help="ADS1256 data rate override in SPS")
+    parser.add_argument("--single-ended", type=parse_bool, default=None,
+                        help="Input mode override: true for single-ended, false for differential")
+    parser.add_argument("--no-chip-id-check", action="store_true",
+                        help="Skip ADS1256 chip ID validation while debugging SPI/CS wiring")
     parser.add_argument("--count", type=int, default=0,
                         help="Number of samples to read (0=run forever)")
     args = parser.parse_args()
 
     adc_cfg = dict(DEFAULT.get("adc", {}))
     adc_cfg["sample_rate"] = args.rate
+    if args.adc is not None:
+        adc_cfg["type"] = args.adc
+    if args.mock:
+        adc_cfg["type"] = "mock"
+    if args.gain is not None:
+        adc_cfg["gain"] = args.gain
+    if args.data_rate is not None:
+        adc_cfg["data_rate"] = args.data_rate
+    if args.single_ended is not None:
+        adc_cfg["single_ended"] = args.single_ended
+    if args.no_chip_id_check:
+        adc_cfg["validate_chip_id"] = False
     channels = [parse_channel(x) for x in args.channels.split(",") if x.strip()]
 
-    adc = create_adc(adc_cfg, use_mock=args.mock)
-    if hasattr(adc, "set_sample_rate"):
-        adc.set_sample_rate(args.rate)
+    adc = None
+    try:
+        adc, fallback_error = create_adc(adc_cfg)
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        if args.data_rate is not None and hasattr(adc, "set_data_rate"):
+            adc.set_data_rate(args.data_rate)
+        elif hasattr(adc, "set_sample_rate"):
+            adc.set_sample_rate(args.rate)
+    except Exception as exc:
+        if hasattr(adc, "close"):
+            adc.close()
+        print(f"ERROR: ADC rate configuration failed: {exc}", file=sys.stderr)
+        return 1
 
     vref = float(getattr(adc, "vref", 2.5))
     gain = float(getattr(adc, "gain", 1))
@@ -130,11 +182,16 @@ def main():
 
     print(
         f"ADC: {adc.__class__.__name__} | Rate: {args.rate} Hz | Channels: {', '.join(format_channel(ch) for ch in channels)}")
+    if fallback_error is not None:
+        print(f"Auto mode fallback: ADS1256 unavailable ({fallback_error})")
     if single_ended:
         range_text = f"0..{fs_scaled:.{decimals}f} {unit}"
     else:
         range_text = f"-{fs_scaled:.{decimals}f}..+{fs_scaled:.{decimals}f} {unit}"
-    print(f"Gain: {gain} | Vref: {vref} V | Range: {range_text} | Unit: {unit}")
+    data_rate = getattr(adc, "data_rate", None)
+    rate_text = f" | ADS1256 data rate: {data_rate:g} SPS" if data_rate is not None else ""
+    mode_text = "single-ended" if single_ended else "differential"
+    print(f"Mode: {mode_text} | Gain: {gain:g} | Vref: {vref:g} V | Range: {range_text} | Unit: {unit}{rate_text}")
     print("Press Ctrl+C to stop.\n")
 
     period = 1.0 / args.rate if args.rate > 0 else 0.1
@@ -167,7 +224,15 @@ def main():
                 time.sleep(to_sleep)
     except KeyboardInterrupt:
         print("\nStopped.")
+    except Exception as exc:
+        print(f"\nERROR: read failed: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        if adc is not None and hasattr(adc, "close"):
+            adc.close()
+
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
