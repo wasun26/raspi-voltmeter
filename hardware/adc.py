@@ -191,8 +191,10 @@ class ADS1256(AdcDevice):
         self.spi = spidev.SpiDev(spi_bus, spi_device)
         self.spi.max_speed_hz = spi_hz
         self.spi.mode = 0x01
-        if self.cs_pin is not None:
-            self.spi.no_cs = True
+
+        # Do not set spi.no_cs here. The RP1 SPI driver used by Raspberry Pi 5
+        # can reject SPI_NO_CS with EINVAL. ADS1256 chip select is controlled
+        # manually through cs_pin below; the controller's CE0 output is unused.
 
         GPIO.setmode(GPIO.BCM)
         GPIO.setwarnings(False)
