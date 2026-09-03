@@ -112,7 +112,8 @@ raspi-voltmeter/
 ## Notes
 
 - `requirements.txt` intentionally contains portable GUI/data packages only.
-- On Raspberry Pi OS, install `spidev` and `RPi.GPIO` through system packages or the provided `setup.sh`.
+- On Raspberry Pi OS, use the provided `setup.sh`; it installs `spidev` plus
+  `RPi.GPIO` on Pi 4 and older or the compatible `rpi-lgpio` backend on Pi 5.
 - The ADS1256 path requires real Raspberry Pi GPIO/SPI access.
 - Voltage conversion in differential mode uses `Voltage = Raw_Data * 2 * VREF / (8388607 * GAIN)`.
 - Keep hardware-specific changes inside `hardware/`.

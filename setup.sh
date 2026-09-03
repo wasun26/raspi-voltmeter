@@ -14,10 +14,30 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Check if running on Raspberry Pi
-if ! uname -a | grep -q "arm"; then
-    echo -e "${RED}Warning: This doesn't appear to be ARM architecture${NC}"
-    echo "Proceeding anyway..."
+# Detect both 32-bit ARM (armv*) and 64-bit ARM (aarch64). Raspberry Pi 5
+# normally reports aarch64, which the old `grep arm` check did not match.
+ARCH="$(uname -m)"
+case "$ARCH" in
+    arm*|aarch64)
+        echo -e "${GREEN}✓ ARM architecture detected: ${ARCH}${NC}"
+        ;;
+    *)
+        echo -e "${RED}Warning: This doesn't appear to be ARM architecture: ${ARCH}${NC}"
+        echo "Proceeding anyway..."
+        ;;
+esac
+
+PI_MODEL=""
+if [ -r /proc/device-tree/model ]; then
+    PI_MODEL="$(tr -d '\000' < /proc/device-tree/model)"
+    echo "Detected board: ${PI_MODEL}"
+fi
+
+# Pi 5 uses the RP1 GPIO controller. rpi-lgpio provides the RPi.GPIO-compatible
+# API used by the Waveshare-style ADS1256 driver. Older models use RPi.GPIO.
+GPIO_PACKAGE="python3-rpi.gpio"
+if [[ "$PI_MODEL" == *"Raspberry Pi 5"* ]]; then
+    GPIO_PACKAGE="python3-rpi-lgpio"
 fi
 
 echo -e "\n${YELLOW}[1/5] Updating package manager...${NC}"
@@ -36,6 +56,7 @@ sudo apt-get install -y \
     i2c-tools \
     python3-smbus2 \
     python3-spidev \
+    "$GPIO_PACKAGE" \
     build-essential \
     git
 
@@ -65,14 +86,17 @@ fi
 
 # Add user to i2c and gpio groups
 echo "Adding user to i2c and gpio groups..."
-sudo usermod -a -G i2c,gpio,dialout $(whoami)
+SETUP_USER="${SUDO_USER:-$(id -un)}"
+sudo usermod -a -G i2c,gpio,dialout "$SETUP_USER"
 
 echo -e "\n${YELLOW}[4/5] Creating Python virtual environment...${NC}"
 if [ ! -d ".venv" ]; then
-    python3 -m venv .venv
+    python3 -m venv --system-site-packages .venv
     echo "✓ Virtual environment created"
 else
-    echo "✓ Virtual environment already exists"
+    # Make apt-installed spidev and GPIO bindings visible in an existing venv.
+    python3 -m venv --upgrade --system-site-packages .venv
+    echo "✓ Virtual environment updated"
 fi
 
 echo -e "\n${YELLOW}[5/5] Installing Python packages...${NC}"

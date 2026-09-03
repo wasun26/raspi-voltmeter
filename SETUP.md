@@ -96,12 +96,19 @@ Portable dependencies in `requirements.txt`:
 Raspberry Pi OS hardware dependencies:
 
 - `spidev`
-- `RPi.GPIO`
+- `RPi.GPIO` on Raspberry Pi 4 and older
+- `rpi-lgpio` on Raspberry Pi 5 (it provides an `RPi.GPIO`-compatible API)
 
-The provided `setup.sh` installs Raspberry Pi system packages including `python3-spidev`. If your Raspberry Pi OS image does not already provide `RPi.GPIO`, install it with:
+The provided `setup.sh` detects both 32-bit `arm*` and 64-bit `aarch64`, selects
+the GPIO package for the detected Raspberry Pi model, and creates the virtual
+environment with access to system packages. To install the GPIO package manually:
 
 ```bash
+# Raspberry Pi 4 and older
 sudo apt-get install python3-rpi.gpio
+
+# Raspberry Pi 5
+sudo apt-get install python3-rpi-lgpio
 ```
 
 ## Configuration
