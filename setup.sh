@@ -111,7 +111,7 @@ echo -e "\n${YELLOW}[5/5] Installing Python packages...${NC}"
 source .venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
-chmod +x "$SCRIPT_DIR/run_voltmeter.sh"
+chmod +x "$SCRIPT_DIR/RUN_VOLTMETER.sh"
 
 echo -e "\n${GREEN}=========================================="
 echo "✓ Setup complete!"
@@ -121,7 +121,7 @@ echo "Next steps:"
 echo "1. Reboot for I2C/SPI changes to take effect:"
 echo "   sudo reboot"
 echo ""
-echo "2. After reboot, double-click run_voltmeter.sh in this project folder."
+echo "2. After reboot, double-click RUN_VOLTMETER.sh in this project folder."
 echo ""
 echo "3. Check I2C devices:"
 echo "   i2cdetect -y 1"
