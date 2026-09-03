@@ -111,6 +111,13 @@ sudo apt-get install python3-rpi.gpio
 sudo apt-get install python3-rpi-lgpio
 ```
 
+To start the GUI with the project's `.venv` automatically, double-click
+`run_voltmeter.sh` in the project folder or run:
+
+```bash
+./run_voltmeter.sh
+```
+
 ## Configuration
 
 Runtime defaults are in `config.py`.
