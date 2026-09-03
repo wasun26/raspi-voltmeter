@@ -4,9 +4,17 @@
 
 set -e
 
+# Always create files beside this script, even when it is launched from another
+# working directory (for example: bash /home/pi/raspi-voltmeter/setup.sh).
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+trap 'echo -e "\n${RED}Setup stopped at line ${LINENO}. Fix the error above, then run bash setup.sh again.${NC}" >&2' ERR
+
 echo "=========================================="
 echo "PyQt Voltmeter - Raspberry Pi Setup"
 echo "=========================================="
+echo "Project directory: $SCRIPT_DIR"
 
 # Colors for output
 RED='\033[0;31m'
