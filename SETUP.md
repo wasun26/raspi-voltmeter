@@ -2,6 +2,19 @@
 
 Setup instructions for Raspberry Pi OS and development machines.
 
+## macOS
+
+Python 3 is required. Then run:
+
+```bash
+cd /path/to/raspi-voltmeter
+bash setup.sh
+./run_voltmeter.sh
+```
+
+The macOS path creates `.venv`, installs `requirements.txt`, and skips the
+Raspberry Pi-only GPIO/SPI setup. With `adc.type = "auto"`, it uses `MockAdc`.
+
 ## Raspberry Pi OS
 
 ### Prerequisites

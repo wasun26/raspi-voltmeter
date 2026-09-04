@@ -51,6 +51,17 @@ python serial_monitor.py --adc ads1256 --rate 30 --channels 0-1 --count 10
 python main.py
 ```
 
+### macOS
+
+```bash
+cd /path/to/raspi-voltmeter
+bash setup.sh
+./run_voltmeter.sh
+```
+
+The macOS setup skips Raspberry Pi hardware packages. With `adc.type = "auto"`,
+the application uses `MockAdc` automatically.
+
 ### Development Machine
 
 ```bash

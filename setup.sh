@@ -12,7 +12,7 @@ cd "$SCRIPT_DIR"
 trap 'echo -e "\n${RED}Setup stopped at line ${LINENO}. Fix the error above, then run bash setup.sh again.${NC}" >&2' ERR
 
 echo "=========================================="
-echo "PyQt Voltmeter - Raspberry Pi Setup"
+echo "PyQt Voltmeter - Setup"
 echo "=========================================="
 echo "Project directory: $SCRIPT_DIR"
 
@@ -21,6 +21,39 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
+
+OS_NAME="$(uname -s)"
+
+# macOS development setup. Raspberry Pi-only packages and interface setup are
+# skipped; adc.type=auto will use MockAdc on this platform.
+if [ "$OS_NAME" = "Darwin" ]; then
+    echo -e "${GREEN}✓ macOS detected: $(uname -m)${NC}"
+
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo -e "${RED}Python 3 was not found. Install it from python.org or Homebrew first.${NC}" >&2
+        exit 1
+    fi
+
+    echo -e "\n${YELLOW}[1/2] Creating Python virtual environment...${NC}"
+    if [ ! -d ".venv" ]; then
+        python3 -m venv .venv
+        echo "✓ Virtual environment created"
+    else
+        python3 -m venv --upgrade .venv
+        echo "✓ Virtual environment updated"
+    fi
+
+    echo -e "\n${YELLOW}[2/2] Installing Python packages...${NC}"
+    .venv/bin/python -m pip install --upgrade pip
+    .venv/bin/python -m pip install -r requirements.txt
+    chmod +x "$SCRIPT_DIR/run_voltmeter.sh"
+
+    echo -e "\n${GREEN}=========================================="
+    echo "✓ macOS setup complete (MockAdc mode)"
+    echo "==========================================${NC}"
+    echo "Run: ./run_voltmeter.sh"
+    exit 0
+fi
 
 # Detect both 32-bit ARM (armv*) and 64-bit ARM (aarch64). Raspberry Pi 5
 # normally reports aarch64, which the old `grep arm` check did not match.
