@@ -235,6 +235,13 @@ python serial_monitor.py --adc ads1256 --channels 0-1 --rate 30 --count 10
 CSV files are in `logs/` by default. Confirm that `adc_source` is `ADS1256` and
 that the `AD0-AD1_mV` column has ten data rows.
 
+Recording defaults in `config.py` limit each CSV to 100,000 data rows and reserve
+100 MiB of free drive space. Full files roll over without stopping; low space
+stops acquisition without deleting existing data. GUI Recording settings can
+remember overrides in `recording_settings.json`, which also affect terminal
+startup. CLI options such as `--max-data-lines` and `--min-free-mb` override them
+for a run. Check these settings before enabling the unattended service.
+
 Edit `voltmeter.service.example`: replace `User=pi`, `WorkingDirectory`, the Python
 path, and `--log-dir` with actual absolute paths. The user must have GPIO/SPI access
 and write permission to the recording directory. For an external drive, configure

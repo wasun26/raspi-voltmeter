@@ -13,6 +13,7 @@ from unittest.mock import patch
 from core.acquisition import AcquisitionManager
 from core.recording import CsvRecorder
 from hardware.adc import MockAdc
+from config import load_recording_settings, save_recording_settings
 
 
 class RecordingTests(unittest.TestCase):
@@ -149,6 +150,81 @@ class RecordingTests(unittest.TestCase):
             if process.poll() is None:
                 process.kill()
                 process.wait(timeout=5)
+
+    def test_line_limit_rotates_without_gaps_or_empty_trailing_file(self):
+        recorder = CsvRecorder(self.temp.name, [(0, 1)], self.adc, max_data_lines=2, file_prefix="site_1")
+        self.addCleanup(recorder.close)
+        now = datetime.now().timestamp()
+        for i in range(5):
+            recorder.write(now + i, {(0, 1): i / 1000})
+        files = sorted(Path(self.temp.name).glob("site_1_*.csv"))
+        batches = [self.rows(path) for path in files]
+        self.assertEqual([len(rows) for rows in batches], [2, 2, 1])
+        self.assertEqual([int(row["sequence"]) for rows in batches for row in rows], [1, 2, 3, 4, 5])
+        self.assertEqual(recorder.saved_count, 5)
+        self.assertEqual(recorder.file_saved_count, 1)
+        self.assertEqual(recorder.files_created, 3)
+        self.assertEqual(recorder.current_file_bytes, recorder.path.stat().st_size)
+
+    def test_disabled_daily_rotation_and_zero_line_limit(self):
+        recorder = CsvRecorder(self.temp.name, [(0, 1)], self.adc, max_data_lines=0, rotate_daily=False)
+        self.addCleanup(recorder.close)
+        now = datetime.now().replace(hour=12).timestamp()
+        recorder.write(now, {(0, 1): 0.01})
+        first = recorder.path
+        recorder.write(now + 86400, {(0, 1): 0.02})
+        self.assertEqual(recorder.path, first)
+        self.assertEqual(recorder.files_created, 1)
+        self.assertEqual(len(self.rows(first)), 2)
+
+    def test_daily_and_line_limit_boundary_creates_only_one_new_file(self):
+        recorder = CsvRecorder(self.temp.name, [(0, 1)], self.adc, max_data_lines=1)
+        self.addCleanup(recorder.close)
+        now = datetime.now().replace(hour=12).timestamp()
+        recorder.write(now, {(0, 1): 0.01})
+        recorder.write(now + 86400, {(0, 1): 0.02})
+        self.assertEqual(recorder.files_created, 2)
+
+    def test_low_space_stops_before_next_write_and_preserves_files(self):
+        self.recorder.write(datetime.now().timestamp(), {(0, 1): 0.01})
+        original = self.recorder.path.read_bytes()
+        self.recorder._next_space_check = 0
+        from collections import namedtuple
+        usage = namedtuple("Usage", "total used free")(1000, 999, 1)
+        with patch("core.recording.shutil.disk_usage", return_value=usage):
+            with self.assertRaisesRegex(OSError, "Low disk space"):
+                self.recorder.write(datetime.now().timestamp(), {(0, 1): 0.02})
+        self.assertEqual(self.recorder.saved_count, 1)
+        self.assertEqual(self.recorder.path.read_bytes(), original)
+
+    def test_invalid_options_rejected(self):
+        for options in ({"max_data_lines": -1}, {"max_data_lines": 1.5},
+                        {"file_prefix": "../escape"}, {"file_prefix": ""},
+                        {"min_free_mb": -1}, {"rotate_daily": "false"}):
+            with self.subTest(options=options), self.assertRaises(ValueError):
+                CsvRecorder(self.temp.name, [(0, 1)], self.adc, **options)
+
+    def test_preferences_roundtrip_and_failed_replace_keeps_previous(self):
+        path = Path(self.temp.name) / "preferences.json"
+        settings = dict(self.recorder.options(), directory=str(self.recorder.directory))
+        save_recording_settings(settings, path)
+        self.assertEqual(load_recording_settings(path), settings)
+        original = path.read_bytes()
+        with patch("config.os.replace", side_effect=OSError("permission denied")):
+            with self.assertRaises(OSError):
+                save_recording_settings(dict(settings, max_data_lines=1), path)
+        self.assertEqual(path.read_bytes(), original)
+        self.assertFalse(list(Path(self.temp.name).glob(".recording_settings_*.tmp")))
+
+    def test_terminal_line_limit_rotates(self):
+        result = subprocess.run(
+            [sys.executable, "-B", "serial_monitor.py", "--mock", "--rate", "100",
+             "--count", "5", "--max-data-lines", "2", "--file-prefix", "cli",
+             "--quiet", "--log-dir", self.temp.name], capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        batches = [self.rows(path) for path in sorted(Path(self.temp.name).glob("cli_*.csv"))]
+        self.assertEqual([len(rows) for rows in batches], [2, 2, 1])
 
 
 if __name__ == "__main__":

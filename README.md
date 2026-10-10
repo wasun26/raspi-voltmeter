@@ -112,7 +112,7 @@ uses `flush()` and `os.fsync()` before being counted as saved. No in-memory queu
 builds up: slow storage reduces the effective acquisition rate. This records
 software readings, not every ADC conversion at the configured hardware SPS.
 
-CSV files have unique session names, rotate on the local calendar day, and never
+CSV files have unique session names, rotate on the local calendar day by default, and never
 overwrite existing files. Columns include time with timezone, Unix time, monotonic
 elapsed seconds, sequence number, actual ADC class (`ADS1256` or `MockAdc`), input
 mode, gain, Vref, averaging count, and mV columns such as `AD0-AD1_mV`.
@@ -160,6 +160,38 @@ panel hides it without stopping acquisition or saving; reopen it through View.
 Clearing the graph does not change CSV files or saved counts.
 Folder changes stay unavailable while measuring; storage failures disable restart
 and keep the recording panel visible.
+
+### Recording settings
+
+Pause measurement, then choose **File > Recording settings…** (`Ctrl+,`) or the
+**Settings…** button in Save data. Applying settings starts a new session, resets
+that session's counters, and keeps all old files.
+
+| Setting | Default | Behavior |
+| --- | --- | --- |
+| Save folder | `logs` | Choose a local or mounted drive directory. |
+| File name prefix | `voltmeter` | Letters/numbers/underscore/hyphen; date, unique session and part number are added. |
+| Max data lines / file | `100000` | Excludes the CSV header. Rotate before the next row once full; `0` disables this limit. |
+| Daily rotation | On | Rotate on the local calendar day, independently of the row limit. |
+| Minimum free drive space | `100` MiB | Check before the first write and every 5 seconds; stop acquisition below the threshold. `0` disables the reserve. Never delete old files. |
+| Remember settings | On | Store preferences in `recording_settings.json` in the project folder for GUI and terminal startup. |
+
+Defaults remain in `config.py`; remembered preferences override them. Unticking
+Remember applies settings to this session only and leaves previously remembered
+preferences unchanged. Preference write errors prevent applying the new session.
+The file-row count, files created, current file size and latest free-space reading
+are shown in Save data. Syncing every reading remains mandatory; there is no
+automatic retention/deletion or downsampling of saved readings.
+
+Terminal overrides are available without changing remembered preferences:
+
+```bash
+python serial_monitor.py --mock --count 5 --max-data-lines 2 --file-prefix site_test --min-free-mb 100
+```
+
+This produces three CSV files with 2, 2 and 1 data rows. A daily and a line-count
+boundary at the same time produces one new file. A malformed preferences file
+causes a startup error; fix it or rename it to use config defaults.
 
 Successfully synced data relies on the storage device honoring sync requests.
 Power loss during an unfinished write can leave an incomplete last row; discard

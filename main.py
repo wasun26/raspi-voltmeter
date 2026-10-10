@@ -1,7 +1,7 @@
 import sys
 from PyQt6.QtWidgets import QApplication
 
-from config import DEFAULT
+from config import DEFAULT, load_recording_settings
 from hardware.adc import MockAdc
 from core.acquisition import AcquisitionManager
 from core.recording import CsvRecorder
@@ -53,11 +53,13 @@ def create_adc(adc_cfg):
 
 
 def main():
+    recording_settings = load_recording_settings()
     adc = create_adc(DEFAULT.get("adc", {}))
     print(f"[main] ADC in use: {adc.__class__.__name__}")
     recorder = CsvRecorder(
-        DEFAULT.get("log_dir", "logs"), DEFAULT.get("channels", [0]), adc,
+        recording_settings.pop("directory"), DEFAULT.get("channels", [0]), adc,
         DEFAULT.get("averaging", 1),
+        **recording_settings,
     ) if DEFAULT.get("log_enabled", True) else None
     acq = AcquisitionManager(
         adc_device=adc,

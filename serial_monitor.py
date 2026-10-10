@@ -5,7 +5,7 @@ import sys
 import threading
 import time
 
-from config import DEFAULT
+from config import DEFAULT, load_recording_settings
 from hardware.adc import MockAdc
 from core.recording import CsvRecorder
 
@@ -109,6 +109,11 @@ def format_channel(channel) -> str:
 
 
 def main():
+    try:
+        recording_settings = load_recording_settings()
+    except Exception as exc:
+        print(f"ERROR: could not load recording settings: {exc}", file=sys.stderr)
+        return 1
     parser = argparse.ArgumentParser(
         description="Serial monitor for ADC readings")
     parser.add_argument(
@@ -138,8 +143,16 @@ def main():
                         help="Skip ADS1256 chip ID validation while debugging SPI/CS wiring")
     parser.add_argument("--count", type=int, default=0,
                         help="Number of samples to read (0=run forever)")
-    parser.add_argument("--log-dir", default=DEFAULT.get("log_dir", "logs"),
+    parser.add_argument("--log-dir", default=recording_settings["directory"],
                         help="CSV directory (default: logs); each row is flushed and fsynced")
+    parser.add_argument("--max-data-lines", type=int, default=recording_settings["max_data_lines"],
+                        help="Data rows per CSV file, excluding header (0=no limit)")
+    parser.add_argument("--file-prefix", default=recording_settings["file_prefix"],
+                        help="CSV filename prefix")
+    parser.add_argument("--min-free-mb", type=int, default=recording_settings["min_free_mb"],
+                        help="Stop below this free space in MiB (0=no reserve)")
+    parser.add_argument("--daily-rotation", type=parse_bool, default=recording_settings["rotate_daily"],
+                        help="Start a new file daily: true/false")
     parser.add_argument("--no-log", action="store_true",
                         help="Disable CSV recording")
     parser.add_argument("--quiet", action="store_true",
@@ -218,7 +231,9 @@ def main():
     try:
         if DEFAULT.get("log_enabled", True) and not args.no_log:
             recording_failed = True
-            recorder = CsvRecorder(args.log_dir, channels, adc, args.averaging)
+            recorder = CsvRecorder(args.log_dir, channels, adc, args.averaging,
+                                   max_data_lines=args.max_data_lines, file_prefix=args.file_prefix,
+                                   rotate_daily=args.daily_rotation, min_free_mb=args.min_free_mb)
             recording_failed = False
             print(f"CSV directory: {recorder.directory} (flush + fsync every sample)")
         while not stop_requested.is_set():

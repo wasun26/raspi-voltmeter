@@ -2,6 +2,8 @@
 import csv
 from datetime import datetime
 import os
+import re
+import shutil
 from pathlib import Path
 import time
 from uuid import uuid4
@@ -29,7 +31,20 @@ class CsvRecorder:
     are never reopened or overwritten. Storage hardware must honor sync requests.
     """
 
-    def __init__(self, directory, channels, adc, averaging=1):
+    def __init__(self, directory, channels, adc, averaging=1, max_data_lines=100000,
+                 file_prefix="voltmeter", rotate_daily=True, min_free_mb=100):
+        if isinstance(max_data_lines, bool) or not isinstance(max_data_lines, int) or max_data_lines < 0:
+            raise ValueError("Max data lines must be a nonnegative integer")
+        if not isinstance(file_prefix, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", file_prefix):
+            raise ValueError("File prefix: 1-64 letters, numbers, underscores or hyphens; start with a letter or number")
+        if not isinstance(rotate_daily, bool):
+            raise ValueError("Daily rotation must be true or false")
+        if isinstance(min_free_mb, bool) or not isinstance(min_free_mb, int) or min_free_mb < 0:
+            raise ValueError("Minimum free MB must be a nonnegative integer")
+        self.max_data_lines = max_data_lines
+        self.file_prefix = file_prefix
+        self.rotate_daily = rotate_daily
+        self.min_free_mb = min_free_mb
         self.directory = Path(directory).expanduser().resolve()
         missing = []
         current = self.directory
@@ -52,6 +67,11 @@ class CsvRecorder:
         self._part = 0
         self._start = time.monotonic()
         self.saved_count = 0
+        self.file_saved_count = 0
+        self.files_created = 0
+        self.current_file_bytes = 0
+        self.last_free_bytes = None
+        self._next_space_check = 0.0
         self.last_saved_timestamp = None
         self.error = None
 
@@ -62,7 +82,7 @@ class CsvRecorder:
     def _open(self, day):
         self.close()
         self._part += 1
-        self.path = self.directory / f"voltmeter_{day}_{self.session}_{self._part}.csv"
+        self.path = self.directory / f"{self.file_prefix}_{day}_{self.session}_{self._part}.csv"
         self._file = self.path.open("x", newline="", encoding="utf-8")
         self._writer = csv.writer(self._file)
         self._writer.writerow([
@@ -73,14 +93,32 @@ class CsvRecorder:
         # fsync(file) alone does not persist its new directory entry on Linux.
         sync_directory(self.directory)
         self._day = day
+        self.file_saved_count = 0
+        self.files_created += 1
+        self.current_file_bytes = self._file.tell()
+
+    def options(self):
+        return dict(max_data_lines=self.max_data_lines, file_prefix=self.file_prefix,
+                    rotate_daily=self.rotate_daily, min_free_mb=self.min_free_mb)
+
+    def _check_space(self):
+        now = time.monotonic()
+        if now >= self._next_space_check:
+            self.last_free_bytes = shutil.disk_usage(self.directory).free
+            if self.last_free_bytes < self.min_free_mb * 1024 * 1024:
+                raise OSError(f"Low disk space: {self.last_free_bytes / 1024 / 1024:.1f} MiB free; "
+                              f"minimum is {self.min_free_mb} MiB. Existing files are kept.")
+            self._next_space_check = now + 5.0
 
     def write(self, timestamp, readings):
         if self.error is not None:
             raise RuntimeError(f"Recording previously failed: {self.error}")
         try:
+            self._check_space()
             when = datetime.fromtimestamp(timestamp).astimezone()
             day = when.strftime("%Y%m%d")
-            if self._file is None or self._day != day:
+            if (self._file is None or (self.rotate_daily and self._day != day)
+                    or (self.max_data_lines and self.file_saved_count >= self.max_data_lines)):
                 self._open(day)
             self._writer.writerow([
                 when.isoformat(timespec="microseconds"), f"{timestamp:.6f}",
@@ -91,6 +129,8 @@ class CsvRecorder:
             ] + [format(readings[ch] * 1000.0, ".12g") for ch in self.channels])
             self._sync()
             self.saved_count += 1
+            self.file_saved_count += 1
+            self.current_file_bytes = self._file.tell()
             self.last_saved_timestamp = timestamp
         except Exception as exc:
             self.error = exc

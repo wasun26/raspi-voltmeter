@@ -8,6 +8,7 @@ from PyQt6.QtGui import QAction, QDesktopServices, QFont
 from PyQt6.QtWidgets import (
     QApplication,
     QDockWidget,
+    QDialog,
     QFileDialog,
     QGridLayout,
     QGroupBox,
@@ -26,6 +27,8 @@ from PyQt6.QtWidgets import (
 
 from gui.chart import create_plot_widget, make_pen
 from core.recording import CsvRecorder
+from config import save_recording_settings
+from gui.recording_settings import RecordingSettingsDialog
 
 
 class MainWindow(QMainWindow):
@@ -170,16 +173,19 @@ class MainWindow(QMainWindow):
         self.last_saved_label = QLabel("Last saved: —")
         recording_layout.addWidget(self.saved_count_label, 1, 0)
         recording_layout.addWidget(self.last_saved_label, 1, 1, 1, 2)
+        self.file_info_label = QLabel()
+        self.file_info_label.setWordWrap(True)
+        recording_layout.addWidget(self.file_info_label, 2, 0, 1, 3)
 
         self.folder_field = QLineEdit()
         self.file_field = QLineEdit()
         for field in (self.folder_field, self.file_field):
             field.setReadOnly(True)
             field.setMinimumWidth(0)
-        recording_layout.addWidget(QLabel("Folder"), 2, 0)
-        recording_layout.addWidget(self.folder_field, 2, 1, 1, 2)
-        recording_layout.addWidget(QLabel("Current file"), 3, 0)
-        recording_layout.addWidget(self.file_field, 3, 1, 1, 2)
+        recording_layout.addWidget(QLabel("Folder"), 3, 0)
+        recording_layout.addWidget(self.folder_field, 3, 1, 1, 2)
+        recording_layout.addWidget(QLabel("Current file"), 4, 0)
+        recording_layout.addWidget(self.file_field, 4, 1, 1, 2)
 
         actions = QHBoxLayout()
         self.open_folder_btn = QPushButton("Open folder")
@@ -189,14 +195,17 @@ class MainWindow(QMainWindow):
         self.change_folder_btn = QPushButton("Change folder…")
         self.change_folder_btn.clicked.connect(self._choose_log_folder)
         self.change_folder_btn.setToolTip("Pause measurement first. Changing folder starts a new recording session.")
-        for button in (self.open_folder_btn, self.copy_path_btn, self.change_folder_btn):
+        self.recording_settings_btn = QPushButton("Settings…")
+        self.recording_settings_btn.clicked.connect(self._show_recording_settings)
+        self.recording_settings_btn.setToolTip("Pause first to apply recording settings and start a new session.")
+        for button in (self.open_folder_btn, self.copy_path_btn, self.change_folder_btn, self.recording_settings_btn):
             actions.addWidget(button)
         actions.addStretch()
-        recording_layout.addLayout(actions, 4, 0, 1, 3)
-        hint = QLabel("Auto-save every reading in mV • New file each day • Pause stops measurement and saving")
+        recording_layout.addLayout(actions, 5, 0, 1, 3)
+        hint = QLabel("Auto-save every reading in mV • Pause stops measurement and saving • Existing files are kept")
         hint.setWordWrap(True)
         hint.setStyleSheet("color: #666; font-size: 11px;")
-        recording_layout.addWidget(hint, 5, 0, 1, 3)
+        recording_layout.addWidget(hint, 6, 0, 1, 3)
         recording_layout.setColumnStretch(1, 1)
         self.recording_dock = self._create_dock("Save data", "recording_dock", recording_group)
 
@@ -263,6 +272,7 @@ class MainWindow(QMainWindow):
         self.open_folder_action = action(file_menu, "&Open recording folder", self._open_log_folder, "Ctrl+O")
         self.change_folder_action = action(file_menu, "&Change recording folder…", self._choose_log_folder, "Ctrl+Shift+O")
         self.copy_path_action = action(file_menu, "&Copy file path", self._copy_log_path, "Ctrl+Shift+C")
+        self.recording_settings_action = action(file_menu, "Recording &settings…", self._show_recording_settings, "Ctrl+,")
         file_menu.addSeparator()
         action(file_menu, "E&xit", self.close, "Ctrl+Q")
 
@@ -319,7 +329,10 @@ class MainWindow(QMainWindow):
             "Start measurement resumes the current session.\n\n"
             "To change destination, pause first, then choose File > Change recording folder. "
             "A new session starts and existing files are kept. "
-            "Set log_dir in config.py to change the startup folder.\n\n"
+            "File > Recording settings sets the maximum data rows per file (header excluded), "
+            "daily rotation, filename prefix and minimum free drive space. "
+            "Remember settings saves these preferences for the next launch. "
+            "Reaching a row limit continues in a new file; low disk space stops acquisition.\n\n"
             "File > Open recording folder (Ctrl+O) opens the saved files. "
             "Clear graph (Ctrl+R) clears display history only.\n\n"
             "Drag a panel title to move it, dock it at an edge, or stack panels as tabs. "
@@ -394,6 +407,8 @@ class MainWindow(QMainWindow):
         self.change_folder_btn.setEnabled(recorder is not None and not running and not failed)
         self.open_folder_btn.setEnabled(recorder is not None)
         self.copy_path_btn.setEnabled(recorder is not None and recorder.path is not None)
+        self.recording_settings_btn.setEnabled(recorder is not None and not running and not failed)
+        self.recording_settings_action.setEnabled(self.recording_settings_btn.isEnabled())
         self.open_folder_action.setEnabled(self.open_folder_btn.isEnabled())
         self.change_folder_action.setEnabled(self.change_folder_btn.isEnabled())
         self.copy_path_action.setEnabled(self.copy_path_btn.isEnabled())
@@ -418,6 +433,14 @@ class MainWindow(QMainWindow):
         self.recording_label.setStyleSheet(f"color: {color}; font-weight: bold;")
         count = recorder.saved_count if recorder else 0
         self.saved_count_label.setText(f"Saved samples: {count:,}")
+        if recorder is not None:
+            limit = f"{recorder.max_data_lines:,}" if recorder.max_data_lines else "unlimited"
+            free = f"{recorder.last_free_bytes / 1024**3:.2f} GiB" if recorder.last_free_bytes is not None else "checked on next reading"
+            self.file_info_label.setText(
+                f"File rows: {recorder.file_saved_count:,} / {limit} | Files: {recorder.files_created} | "
+                f"File size: {recorder.current_file_bytes / 1024:.1f} KiB | Free: {free}")
+        else:
+            self.file_info_label.setText("No active recording session")
         timestamp = recorder.last_saved_timestamp if recorder else None
         last_saved = datetime.fromtimestamp(timestamp).astimezone().strftime("%Y-%m-%d %H:%M:%S %Z") if timestamp is not None else "None yet"
         self.last_saved_label.setText(f"Last saved: {last_saved}")
@@ -447,7 +470,7 @@ class MainWindow(QMainWindow):
         if not folder or folder == str(recorder.directory):
             return
         try:
-            replacement = CsvRecorder(folder, self.acq.channels, self.acq.adc, self.acq.averaging)
+            replacement = CsvRecorder(folder, self.acq.channels, self.acq.adc, self.acq.averaging, **recorder.options())
         except Exception as exc:
             QMessageBox.warning(self, "Recording folder", f"Could not use this folder: {exc}")
             return
@@ -460,6 +483,42 @@ class MainWindow(QMainWindow):
             return
         self.acq.recorder = replacement
         self._update_recording_ui()
+
+    def _show_recording_settings(self):
+        recorder = self.acq.recorder
+        if recorder is None or self.acq._running or self.acq.recording_error is not None:
+            return
+        dialog = RecordingSettingsDialog(recorder, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        self._apply_recording_settings(dialog.recording_options(), dialog.remember.isChecked())
+
+    def _apply_recording_settings(self, options, remember=False):
+        recorder = self.acq.recorder
+        if recorder is None or self.acq._running or self.acq.recording_error is not None:
+            return False
+        replacement = None
+        try:
+            replacement = CsvRecorder(channels=self.acq.channels, adc=self.acq.adc,
+                                      averaging=self.acq.averaging, **options)
+            if remember:
+                saved = dict(options, directory=str(replacement.directory))
+                save_recording_settings(saved)
+        except Exception as exc:
+            if replacement is not None:
+                replacement.close()
+            QMessageBox.warning(self, "Recording settings", f"Could not apply settings: {exc}")
+            return False
+        try:
+            recorder.close()
+        except Exception as exc:
+            replacement.close()
+            self.acq.recording_error = RuntimeError(f"Recording close failed: {exc}")
+            self._update_ui()
+            return False
+        self.acq.recorder = replacement
+        self._update_ui()
+        return True
 
     def _toggle(self):
         if self.acq.recording_error is not None:

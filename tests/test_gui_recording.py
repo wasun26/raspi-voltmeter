@@ -15,6 +15,8 @@ from core.acquisition import AcquisitionManager
 from core.recording import CsvRecorder
 from gui.main_window import MainWindow
 from hardware.adc import MockAdc
+from gui.recording_settings import RecordingSettingsDialog
+from config import load_recording_settings, save_recording_settings
 
 
 class RecordingUiTests(unittest.TestCase):
@@ -137,6 +139,45 @@ class RecordingUiTests(unittest.TestCase):
         self.win._update_ui()
         self.assertFalse(self.win.recording_dock.isHidden())
         self.assertFalse(self.win.measurement_action.isEnabled())
+
+    def test_settings_apply_remember_and_rotation_preserve_old_session(self):
+        self.win.start_btn.click()
+        self.wait_for_saved(2)
+        self.assertFalse(self.win.recording_settings_action.isEnabled())
+        self.win.start_btn.click()
+        original_path = self.recorder.path
+        original = original_path.read_bytes()
+        dialog = RecordingSettingsDialog(self.recorder, self.win)
+        dialog.max_lines.setValue(2)
+        dialog.prefix.setText("new_test")
+        dialog.daily.setChecked(False)
+        preferences = Path(self.temp.name) / "settings.json"
+        with patch("gui.main_window.RecordingSettingsDialog", return_value=dialog), \
+             patch.object(dialog, "exec", return_value=dialog.DialogCode.Accepted), \
+             patch("gui.main_window.save_recording_settings", side_effect=lambda opts: save_recording_settings(opts, preferences)):
+            self.win.recording_settings_action.trigger()
+        self.assertEqual(load_recording_settings(preferences)["max_data_lines"], 2)
+        self.assertEqual(self.acq.recorder.saved_count, 0)
+        self.win.start_btn.click()
+        self.wait_for_saved(5)
+        self.win.start_btn.click()
+        files = sorted(Path(self.temp.name).glob("new_test_*.csv"))
+        counts = []
+        for path in files:
+            with path.open(newline="") as handle:
+                counts.append(len(list(csv.DictReader(handle))))
+        self.assertTrue(all(0 < count <= 2 for count in counts))
+        self.assertEqual(sum(counts), self.acq.recorder.saved_count)
+        self.assertEqual(original_path.read_bytes(), original)
+        self.assertIn("/ 2", self.win.file_info_label.text())
+
+    def test_failed_preference_save_keeps_current_session(self):
+        options = dict(self.recorder.options(), directory=self.temp.name)
+        with patch("gui.main_window.save_recording_settings", side_effect=OSError("read only")), \
+             patch("gui.main_window.QMessageBox.warning") as warning:
+            self.assertFalse(self.win._apply_recording_settings(options, remember=True))
+        self.assertIs(self.acq.recorder, self.recorder)
+        warning.assert_called_once()
 
 
 if __name__ == "__main__":
