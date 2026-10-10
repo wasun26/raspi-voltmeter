@@ -138,6 +138,16 @@ The GUI shows the CSV path and number of successfully synced samples; a recordin
 error stops acquisition and stays visible until restart. The terminal exits with
 status 1 on write/sync errors, including a full or inaccessible drive.
 
+The GUI's **Save data — CSV** panel shows saving/paused/error status, saved sample
+count, last saved time, recording folder, and current file. **Open folder** and
+**Copy file path** help inspect the CSV. **Pause measurement** stops both reading
+and saving; **Start measurement** resumes into the same session. To select a new
+destination, pause first and use **Change folder…**; this starts a new CSV session
+with its own saved count and keeps old files. Folder selection applies to the
+current run; set `log_dir` in `config.py` to change the startup destination.
+The chart uses mV, matching the CSV, and mock measurements are labeled
+**SIMULATED DATA**.
+
 Successfully synced data relies on the storage device honoring sync requests.
 Power loss during an unfinished write can leave an incomplete last row; discard
 that row when analyzing. A restart writes a new file and preserves old files.

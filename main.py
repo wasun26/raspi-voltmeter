@@ -82,8 +82,8 @@ def main():
         result = app.exec()
     finally:
         acq.stop()
-        if recorder is not None:
-            recorder.close()
+        if acq.recorder is not None:
+            acq.recorder.close()
         if hasattr(adc, "close"):
             adc.close()
     sys.exit(result)

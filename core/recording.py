@@ -52,6 +52,7 @@ class CsvRecorder:
         self._part = 0
         self._start = time.monotonic()
         self.saved_count = 0
+        self.last_saved_timestamp = None
         self.error = None
 
     def _sync(self):
@@ -90,6 +91,7 @@ class CsvRecorder:
             ] + [format(readings[ch] * 1000.0, ".12g") for ch in self.channels])
             self._sync()
             self.saved_count += 1
+            self.last_saved_timestamp = timestamp
         except Exception as exc:
             self.error = exc
             raise
