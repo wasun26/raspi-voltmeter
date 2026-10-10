@@ -213,6 +213,8 @@ class RecordingUiTests(unittest.TestCase):
         path = self.recorder.path
         self.win.collection_mode_action.trigger()
         self.assertTrue(self.win._collection_mode)
+        self.assertEqual(self.win.voltage_label.text(), "DATA COLLECTION MODE")
+        self.assertIs(self.win.voltage_label.parentWidget(), self.win.recording_group)
         self.assertEqual(self.win.timer.interval(), 3000)
         self.assertFalse(self.win._plot_active)
         self.assertFalse(self.win._time_buffer)
@@ -229,8 +231,13 @@ class RecordingUiTests(unittest.TestCase):
         self.assertEqual(self.acq.sample_rate, rate)
         self.assertEqual(self.adc.gain, gain)
         self.assertIs(self.acq.recorder, self.recorder)
+        self.win.measurement_action.trigger()
+        self.assertEqual(self.win.voltage_label.text(), "COLLECTION MODE PAUSED")
+        self.win.measurement_action.trigger()
+        self.assertEqual(self.win.voltage_label.text(), "DATA COLLECTION MODE")
         self.win.collection_mode_action.trigger()
         self.app.processEvents()
+        self.assertIn("mV", self.win.voltage_label.text())
         self.assertTrue(self.win._plot_active)
         self.assertEqual(self.win.timer.interval(), 100)
         count = self.recorder.saved_count

@@ -129,6 +129,8 @@ class MainWindow(QMainWindow):
         self.voltage_label.setStyleSheet(
             "color: #2E7D32; background-color: #E8F5E9; padding: 20px; border-radius: 10px;")
         display_layout.addWidget(self.voltage_label)
+        self.display_layout = display_layout
+        self.voltage_font = large_font
 
         # Status/error message
         self.status_label = QLabel("Waiting for data...")
@@ -187,26 +189,27 @@ class MainWindow(QMainWindow):
         recording_layout.setContentsMargins(12, 12, 12, 12)
         recording_layout.setHorizontalSpacing(12)
         recording_layout.setVerticalSpacing(8)
+        self.recording_layout = recording_layout
         self.recording_label = QLabel("Waiting for first sample")
         self.recording_label.setWordWrap(True)
-        recording_layout.addWidget(self.recording_label, 0, 0, 1, 3)
+        recording_layout.addWidget(self.recording_label, 1, 0, 1, 3)
         self.saved_count_label = QLabel("Saved samples: 0")
         self.last_saved_label = QLabel("Last saved: —")
-        recording_layout.addWidget(self.saved_count_label, 1, 0)
-        recording_layout.addWidget(self.last_saved_label, 1, 1, 1, 2)
+        recording_layout.addWidget(self.saved_count_label, 2, 0)
+        recording_layout.addWidget(self.last_saved_label, 2, 1, 1, 2)
         self.file_info_label = QLabel()
         self.file_info_label.setWordWrap(True)
-        recording_layout.addWidget(self.file_info_label, 2, 0, 1, 3)
+        recording_layout.addWidget(self.file_info_label, 3, 0, 1, 3)
 
         self.folder_field = QLineEdit()
         self.file_field = QLineEdit()
         for field in (self.folder_field, self.file_field):
             field.setReadOnly(True)
             field.setMinimumWidth(0)
-        recording_layout.addWidget(QLabel("Folder"), 3, 0)
-        recording_layout.addWidget(self.folder_field, 3, 1, 1, 2)
-        recording_layout.addWidget(QLabel("Current file"), 4, 0)
-        recording_layout.addWidget(self.file_field, 4, 1, 1, 2)
+        recording_layout.addWidget(QLabel("Folder"), 4, 0)
+        recording_layout.addWidget(self.folder_field, 4, 1, 1, 2)
+        recording_layout.addWidget(QLabel("Current file"), 5, 0)
+        recording_layout.addWidget(self.file_field, 5, 1, 1, 2)
 
         actions = QHBoxLayout()
         self.open_folder_btn = QPushButton("Open folder")
@@ -222,13 +225,13 @@ class MainWindow(QMainWindow):
         for button in (self.open_folder_btn, self.copy_path_btn, self.change_folder_btn, self.recording_settings_btn):
             actions.addWidget(button)
         actions.addStretch()
-        recording_layout.addLayout(actions, 5, 0, 1, 3)
+        recording_layout.addLayout(actions, 6, 0, 1, 3)
         hint = QLabel("Auto-save every reading in mV • Pause stops measurement and saving • Existing files are kept")
         hint.setWordWrap(True)
         hint.setStyleSheet("color: #666; font-size: 11px;")
-        recording_layout.addWidget(hint, 6, 0, 1, 3)
+        recording_layout.addWidget(hint, 7, 0, 1, 3)
         recording_layout.setColumnStretch(1, 1)
-        recording_layout.setRowStretch(7, 1)
+        recording_layout.setRowStretch(8, 1)
         self.recording_dock = self._create_dock("Save data", "recording_dock", recording_group)
 
         # Plot
@@ -396,12 +399,20 @@ class MainWindow(QMainWindow):
         self.setMinimumHeight(360 if enabled else 740)
         if enabled:
             self._monitor_layout = self.saveState()
+            self.display_layout.removeWidget(self.voltage_label)
+            self.recording_layout.addWidget(self.voltage_label, 0, 0, 1, 3)
+            mode_font = QFont(self.voltage_font)
+            mode_font.setPointSize(20)
+            self.voltage_label.setFont(mode_font)
             self.measurement_dock.hide()
             self.chart_dock.hide()
             self.recording_dock.show()
             self.recording_dock.raise_()
             self.timer.setInterval(self._collection_ui_refresh_ms)
         elif self._monitor_layout is not None:
+            self.recording_layout.removeWidget(self.voltage_label)
+            self.display_layout.insertWidget(1, self.voltage_label)
+            self.voltage_label.setFont(self.voltage_font)
             self.restoreState(self._monitor_layout)
             self._monitor_layout = None
         self.chart_dock.toggleViewAction().setEnabled(not enabled)
@@ -492,6 +503,10 @@ class MainWindow(QMainWindow):
             self.status_label.setText(f"{self._last_error} (Errors: {self._error_count})")
             self.status_label.setWordWrap(True)
             self.status_label.setStyleSheet("color: #C62828; padding: 4px; font-weight: bold;")
+        elif self._collection_mode:
+            self.voltage_label.setText("DATA COLLECTION MODE" if self.acq._running else "COLLECTION MODE PAUSED")
+            self.voltage_label.setStyleSheet(
+                "color: #2E7D32; background-color: #E8F5E9; padding: 12px; border-radius: 10px;")
         elif self._last is not None:
             if len(self.acq.channels) == 1:
                 self.voltage_label.setText(self._format_voltage(self._last.get(self.acq.channels[0], 0.0)))
