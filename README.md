@@ -116,6 +116,9 @@ CSV files use date/time and sequential file numbers, rotate on the local calenda
 overwrite existing files. Columns include time with timezone, Unix time, monotonic
 elapsed seconds, sequence number, actual ADC class (`ADS1256` or `MockAdc`), input
 mode, gain, Vref, averaging count, and mV columns such as `AD0-AD1_mV`.
+In **Recording settings > CSV columns**, choose which columns to save. Local
+timestamp and at least one voltage channel are required. Applying the setting
+while paused starts a new CSV file; existing files retain their original columns.
 Old CSV files are not deleted automatically.
 
 Test recording without hardware:

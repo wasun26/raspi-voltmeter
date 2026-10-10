@@ -14,6 +14,12 @@ def channel_name(channel):
     return f"CH{channel}"
 
 
+METADATA_COLUMNS = (
+    "timestamp", "unix_timestamp", "elapsed_s", "sequence", "adc_source",
+    "input_mode", "gain", "vref_V", "averaging",
+)
+
+
 def sync_directory(directory):
     if os.name == "posix":
         fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
@@ -31,7 +37,8 @@ class CsvRecorder:
     """
 
     def __init__(self, directory, channels, adc, averaging=1, max_data_lines=100000,
-                 file_prefix="voltmeter", rotate_daily=True, min_free_mb=100):
+                 file_prefix="voltmeter", rotate_daily=True, min_free_mb=100,
+                 included_columns=None):
         if isinstance(max_data_lines, bool) or not isinstance(max_data_lines, int) or max_data_lines < 0:
             raise ValueError("Max data lines must be a nonnegative integer")
         if not isinstance(file_prefix, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", file_prefix):
@@ -56,6 +63,21 @@ class CsvRecorder:
         if not self.directory.is_dir():
             raise NotADirectoryError(str(self.directory))
         self.channels = tuple(channels)
+        channel_columns = tuple(f"{channel_name(ch)}_mV" for ch in self.channels)
+        available = METADATA_COLUMNS + channel_columns
+        if len(set(available)) != len(available):
+            raise ValueError("CSV column names must be unique")
+        if included_columns is None:
+            included_columns = available
+        if (not isinstance(included_columns, (list, tuple))
+                or any(not isinstance(column, str) for column in included_columns)
+                or len(set(included_columns)) != len(included_columns)
+                or "timestamp" not in included_columns
+                or not any(column in included_columns for column in channel_columns)
+                or any(column not in available for column in included_columns)):
+            raise ValueError("Select timestamp and at least one voltage channel; use available CSV columns only")
+        self.available_columns = available
+        self.included_columns = tuple(column for column in available if column in included_columns)
         self.adc = adc
         self.averaging = averaging
         self.path = None
@@ -92,10 +114,7 @@ class CsvRecorder:
             self._file = handle
             break
         self._writer = csv.writer(self._file)
-        self._writer.writerow([
-            "timestamp", "unix_timestamp", "elapsed_s", "sequence", "adc_source",
-            "input_mode", "gain", "vref_V", "averaging",
-        ] + [f"{channel_name(ch)}_mV" for ch in self.channels])
+        self._writer.writerow(self.included_columns)
         self._sync()
         # fsync(file) alone does not persist its new directory entry on Linux.
         sync_directory(self.directory)
@@ -106,7 +125,8 @@ class CsvRecorder:
 
     def options(self):
         return dict(max_data_lines=self.max_data_lines, file_prefix=self.file_prefix,
-                    rotate_daily=self.rotate_daily, min_free_mb=self.min_free_mb)
+                    rotate_daily=self.rotate_daily, min_free_mb=self.min_free_mb,
+                    included_columns=list(self.included_columns))
 
     def _check_space(self):
         now = time.monotonic()
@@ -127,13 +147,20 @@ class CsvRecorder:
             if (self._file is None or (self.rotate_daily and self._day != day)
                     or (self.max_data_lines and self.file_saved_count >= self.max_data_lines)):
                 self._open(when)
-            self._writer.writerow([
-                when.isoformat(timespec="microseconds"), f"{timestamp:.6f}",
-                f"{time.monotonic() - self._start:.6f}", self.saved_count + 1,
-                type(self.adc).__name__,
-                "single-ended" if getattr(self.adc, "single_ended", True) else "differential",
-                getattr(self.adc, "gain", ""), getattr(self.adc, "vref", ""), self.averaging,
-            ] + [format(readings[ch] * 1000.0, ".12g") for ch in self.channels])
+            values = {
+                "timestamp": when.isoformat(timespec="microseconds"),
+                "unix_timestamp": f"{timestamp:.6f}",
+                "elapsed_s": f"{time.monotonic() - self._start:.6f}",
+                "sequence": self.saved_count + 1,
+                "adc_source": type(self.adc).__name__,
+                "input_mode": "single-ended" if getattr(self.adc, "single_ended", True) else "differential",
+                "gain": getattr(self.adc, "gain", ""),
+                "vref_V": getattr(self.adc, "vref", ""),
+                "averaging": self.averaging,
+            }
+            values.update((f"{channel_name(ch)}_mV", format(readings[ch] * 1000.0, ".12g"))
+                          for ch in self.channels if f"{channel_name(ch)}_mV" in self.included_columns)
+            self._writer.writerow([values[column] for column in self.included_columns])
             self._sync()
             self.saved_count += 1
             self.file_saved_count += 1

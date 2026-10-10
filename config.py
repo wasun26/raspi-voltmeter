@@ -40,6 +40,7 @@ DEFAULT = {
         "file_prefix": "voltmeter",
         "rotate_daily": True,
         "min_free_mb": 100,  # Stop when drive free space drops below this.
+        "included_columns": None,  # All columns by default; timestamp and one mV channel are required.
     },
 }
 

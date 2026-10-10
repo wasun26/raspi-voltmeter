@@ -151,12 +151,15 @@ class RecordingUiTests(unittest.TestCase):
         dialog.max_lines.setValue(2)
         dialog.prefix.setText("new_test")
         dialog.daily.setChecked(False)
+        dialog.column_checks["unix_timestamp"].setChecked(False)
+        dialog.column_checks["adc_source"].setChecked(False)
         preferences = Path(self.temp.name) / "settings.json"
         with patch("gui.main_window.RecordingSettingsDialog", return_value=dialog), \
              patch.object(dialog, "exec", return_value=dialog.DialogCode.Accepted), \
              patch("gui.main_window.save_recording_settings", side_effect=lambda opts: save_recording_settings(opts, preferences)):
             self.win.recording_settings_action.trigger()
         self.assertEqual(load_recording_settings(preferences)["max_data_lines"], 2)
+        self.assertNotIn("unix_timestamp", load_recording_settings(preferences)["included_columns"])
         self.assertEqual(self.acq.recorder.saved_count, 0)
         self.win.start_btn.click()
         self.wait_for_saved(5)
@@ -165,7 +168,11 @@ class RecordingUiTests(unittest.TestCase):
         counts = []
         for path in files:
             with path.open(newline="") as handle:
-                counts.append(len(list(csv.DictReader(handle))))
+                reader = csv.DictReader(handle)
+                self.assertNotIn("unix_timestamp", reader.fieldnames)
+                self.assertNotIn("adc_source", reader.fieldnames)
+                self.assertIn("AD0-AD1_mV", reader.fieldnames)
+                counts.append(len(list(reader)))
         self.assertTrue(all(0 < count <= 2 for count in counts))
         self.assertEqual(sum(counts), self.acq.recorder.saved_count)
         self.assertEqual(original_path.read_bytes(), original)

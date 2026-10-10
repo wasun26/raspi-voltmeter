@@ -55,6 +55,30 @@ class RecordingTests(unittest.TestCase):
         finally:
             other.close()
 
+    def test_selected_columns_persist_through_rotation(self):
+        columns = ["timestamp", "sequence", "AD2-AD3_mV"]
+        recorder = CsvRecorder(self.temp.name, [(0, 1), (2, 3)], self.adc,
+                               included_columns=columns, max_data_lines=1)
+        self.addCleanup(recorder.close)
+        timestamp = datetime.now().timestamp()
+        for value in (0.01, 0.02):
+            recorder.write(timestamp, {(0, 1): 0.5, (2, 3): value})
+        files = sorted(Path(self.temp.name).glob("voltmeter_*.csv"))
+        self.assertEqual(len(files), 2)
+        for index, path in enumerate(files, 1):
+            row = self.rows(path)[0]
+            self.assertEqual(list(row), columns)
+            self.assertEqual(row["sequence"], str(index))
+            self.assertEqual(row["AD2-AD3_mV"], str(index * 10))
+        self.assertEqual(recorder.options()["included_columns"], columns)
+
+    def test_selected_columns_require_time_and_voltage(self):
+        for columns in (["timestamp"], ["AD0-AD1_mV"],
+                        ["timestamp", "unknown", "AD0-AD1_mV"],
+                        ["timestamp", "timestamp", "AD0-AD1_mV"]):
+            with self.subTest(columns=columns), self.assertRaises(ValueError):
+                CsvRecorder(self.temp.name, [(0, 1)], self.adc, included_columns=columns)
+
     def test_same_timestamp_filename_collisions_use_numbers_not_random_names(self):
         timestamp = datetime(2026, 10, 11, 14, 30, 0).timestamp()
         self.recorder.write(timestamp, {(0, 1): 0.01})

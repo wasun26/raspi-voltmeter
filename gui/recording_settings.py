@@ -4,7 +4,7 @@ from PyQt6.QtCore import QLocale
 
 from PyQt6.QtWidgets import (
     QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
-    QHBoxLayout, QLabel, QLineEdit, QMessageBox, QSpinBox, QVBoxLayout,
+    QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QSpinBox, QVBoxLayout,
     QPushButton,
 )
 
@@ -57,6 +57,18 @@ class RecordingSettingsDialog(QDialog):
         min_free_row.addWidget(QLabel("MiB"))
         form.addRow("Minimum free drive space", min_free_row)
         layout.addLayout(form)
+        columns_group = QGroupBox("CSV columns")
+        columns_layout = QGridLayout(columns_group)
+        self.column_checks = {}
+        for index, column in enumerate(recorder.available_columns):
+            check = QCheckBox(column)
+            check.setChecked(column in recorder.included_columns)
+            if column == "timestamp":
+                check.setEnabled(False)
+                check.setToolTip("Required to identify when each reading was taken.")
+            columns_layout.addWidget(check, index // 2, index % 2)
+            self.column_checks[column] = check
+        layout.addWidget(columns_group)
         safety = QLabel("CSV • mV • Sync every reading\nNo automatic deletion or overwriting. A full drive or write error stops acquisition.")
         safety.setWordWrap(True)
         layout.addWidget(safety)
@@ -77,7 +89,8 @@ class RecordingSettingsDialog(QDialog):
     def recording_options(self):
         return dict(directory=self.directory.text().strip(), file_prefix=self.prefix.text().strip(),
                     max_data_lines=self.max_lines.value(), rotate_daily=self.daily.isChecked(),
-                    min_free_mb=self.min_free.value())
+                    min_free_mb=self.min_free.value(),
+                    included_columns=[column for column, check in self.column_checks.items() if check.isChecked()])
 
     def accept(self):
         options = self.recording_options()
@@ -86,5 +99,8 @@ class RecordingSettingsDialog(QDialog):
             return
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", options["file_prefix"]):
             QMessageBox.warning(self, "Recording settings", "Prefix must start with a letter or number and contain only letters, numbers, underscores or hyphens.")
+            return
+        if not any(column.endswith("_mV") for column in options["included_columns"]):
+            QMessageBox.warning(self, "Recording settings", "Select at least one voltage channel to save.")
             return
         super().accept()
