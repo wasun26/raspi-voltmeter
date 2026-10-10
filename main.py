@@ -1,4 +1,5 @@
 import sys
+from PyQt6.QtCore import QLocale
 from PyQt6.QtWidgets import QApplication
 
 from config import DEFAULT, load_recording_settings
@@ -53,6 +54,7 @@ def create_adc(adc_cfg):
 
 
 def main():
+    QLocale.setDefault(QLocale.c())
     recording_settings = load_recording_settings()
     adc = create_adc(DEFAULT.get("adc", {}))
     print(f"[main] ADC in use: {adc.__class__.__name__}")

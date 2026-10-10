@@ -6,7 +6,6 @@ import re
 import shutil
 from pathlib import Path
 import time
-from uuid import uuid4
 
 
 def channel_name(channel):
@@ -59,7 +58,6 @@ class CsvRecorder:
         self.channels = tuple(channels)
         self.adc = adc
         self.averaging = averaging
-        self.session = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid4().hex
         self.path = None
         self._file = None
         self._writer = None
@@ -79,11 +77,20 @@ class CsvRecorder:
         self._file.flush()
         os.fsync(self._file.fileno())
 
-    def _open(self, day):
+    def _open(self, when):
         self.close()
-        self._part += 1
-        self.path = self.directory / f"{self.file_prefix}_{day}_{self.session}_{self._part}.csv"
-        self._file = self.path.open("x", newline="", encoding="utf-8")
+        stamp = when.strftime("%Y%m%d_%H%M%S")
+        while True:
+            self._part += 1
+            path = self.directory / f"{self.file_prefix}_{stamp}_{self._part:04d}.csv"
+            try:
+                handle = path.open("x", newline="", encoding="utf-8")
+            except FileExistsError:
+                # Same-second restarts/concurrent recorders must never overwrite.
+                continue
+            self.path = path
+            self._file = handle
+            break
         self._writer = csv.writer(self._file)
         self._writer.writerow([
             "timestamp", "unix_timestamp", "elapsed_s", "sequence", "adc_source",
@@ -92,7 +99,7 @@ class CsvRecorder:
         self._sync()
         # fsync(file) alone does not persist its new directory entry on Linux.
         sync_directory(self.directory)
-        self._day = day
+        self._day = when.strftime("%Y%m%d")
         self.file_saved_count = 0
         self.files_created += 1
         self.current_file_bytes = self._file.tell()
@@ -119,7 +126,7 @@ class CsvRecorder:
             day = when.strftime("%Y%m%d")
             if (self._file is None or (self.rotate_daily and self._day != day)
                     or (self.max_data_lines and self.file_saved_count >= self.max_data_lines)):
-                self._open(day)
+                self._open(when)
             self._writer.writerow([
                 when.isoformat(timespec="microseconds"), f"{timestamp:.6f}",
                 f"{time.monotonic() - self._start:.6f}", self.saved_count + 1,

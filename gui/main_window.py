@@ -3,7 +3,7 @@ from collections import deque
 from datetime import datetime
 import threading
 
-from PyQt6.QtCore import Qt, QTimer, QUrl
+from PyQt6.QtCore import QLocale, Qt, QTimer, QUrl
 from PyQt6.QtGui import QAction, QDesktopServices, QFont
 from PyQt6.QtWidgets import (
     QApplication,
@@ -39,6 +39,7 @@ class MainWindow(QMainWindow):
         plot_max_points: int = 2000,
     ):
         super().__init__()
+        self.setLocale(QLocale.c())
         self.setWindowTitle("Voltmeter - PyQt")
         self.resize(960, 760)
         self.setMinimumSize(720, 620)
@@ -133,14 +134,17 @@ class MainWindow(QMainWindow):
         self.start_btn.clicked.connect(self._toggle)
         control_layout.addWidget(self.start_btn)
 
-        rate_label = QLabel("Sample Rate (Hz):")
+        rate_label = QLabel("Sample Rate:")
         control_layout.addWidget(rate_label)
 
         self.rate_spin = QSpinBox()
+        self.rate_spin.setLocale(QLocale(QLocale.Language.English, QLocale.Country.UnitedStates))
+        self.rate_spin.setGroupSeparatorShown(True)
         self.rate_spin.setRange(1, 10000)
         self.rate_spin.setValue(int(self.acq.sample_rate))
         self.rate_spin.valueChanged.connect(self._change_rate)
         control_layout.addWidget(self.rate_spin)
+        control_layout.addWidget(QLabel("Hz"))
 
         gain_label = QLabel("Gain:")
         control_layout.addWidget(gain_label)

@@ -1,5 +1,6 @@
 """Recording preferences; applying them starts a new session while paused."""
 import re
+from PyQt6.QtCore import QLocale
 
 from PyQt6.QtWidgets import (
     QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
@@ -11,6 +12,7 @@ from PyQt6.QtWidgets import (
 class RecordingSettingsDialog(QDialog):
     def __init__(self, recorder, parent=None):
         super().__init__(parent)
+        self.setLocale(QLocale.c())
         self.setWindowTitle("Recording settings")
         self.setMinimumWidth(540)
         layout = QVBoxLayout(self)
@@ -27,24 +29,33 @@ class RecordingSettingsDialog(QDialog):
         form.addRow("Save folder", folder_row)
         self.prefix = QLineEdit(recorder.file_prefix)
         self.prefix.setMaxLength(64)
-        self.prefix.setToolTip("Letters, numbers, underscores and hyphens. Date/session/part are added automatically.")
+        self.prefix.setToolTip("Letters, numbers, underscores and hyphens. Date, time and file number are added automatically.")
         form.addRow("File name prefix", self.prefix)
         self.max_lines = QSpinBox()
+        self.max_lines.setLocale(QLocale(QLocale.Language.English, QLocale.Country.UnitedStates))
+        self.max_lines.setGroupSeparatorShown(True)
         self.max_lines.setRange(0, 2147483647)
         self.max_lines.setSpecialValueText("No line limit")
         self.max_lines.setValue(recorder.max_data_lines)
         self.max_lines.setToolTip("Data rows per file, excluding header. On reaching this limit, continue in a new file.")
-        form.addRow("Max data lines / file", self.max_lines)
+        max_lines_row = QHBoxLayout()
+        max_lines_row.addWidget(self.max_lines)
+        max_lines_row.addWidget(QLabel("rows"))
+        form.addRow("Max data lines / file", max_lines_row)
         self.daily = QCheckBox("Start a new file each calendar day")
         self.daily.setChecked(recorder.rotate_daily)
         form.addRow("Daily rotation", self.daily)
         self.min_free = QSpinBox()
+        self.min_free.setLocale(QLocale(QLocale.Language.English, QLocale.Country.UnitedStates))
+        self.min_free.setGroupSeparatorShown(True)
         self.min_free.setRange(0, 1000000)
-        self.min_free.setSuffix(" MiB")
         self.min_free.setSpecialValueText("No reserved space")
         self.min_free.setValue(recorder.min_free_mb)
         self.min_free.setToolTip("Stop acquisition below this free-space threshold. Checked every 5 seconds; never delete old files.")
-        form.addRow("Minimum free drive space", self.min_free)
+        min_free_row = QHBoxLayout()
+        min_free_row.addWidget(self.min_free)
+        min_free_row.addWidget(QLabel("MiB"))
+        form.addRow("Minimum free drive space", min_free_row)
         layout.addLayout(form)
         safety = QLabel("CSV • mV • Sync every reading\nNo automatic deletion or overwriting. A full drive or write error stops acquisition.")
         safety.setWordWrap(True)

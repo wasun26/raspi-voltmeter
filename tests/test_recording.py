@@ -55,6 +55,30 @@ class RecordingTests(unittest.TestCase):
         finally:
             other.close()
 
+    def test_same_timestamp_filename_collisions_use_numbers_not_random_names(self):
+        timestamp = datetime(2026, 10, 11, 14, 30, 0).timestamp()
+        self.recorder.write(timestamp, {(0, 1): 0.01})
+        first = self.recorder.path
+        self.assertEqual(first.name, "voltmeter_20261011_143000_0001.csv")
+        original = first.read_bytes()
+        other = CsvRecorder(self.temp.name, [(0, 1)], self.adc)
+        self.addCleanup(other.close)
+        other.write(timestamp, {(0, 1): 0.02})
+        self.assertEqual(other.path.name, "voltmeter_20261011_143000_0002.csv")
+        self.assertEqual(first.read_bytes(), original)
+
+    def test_exact_line_limit_waits_for_next_row_to_rotate(self):
+        recorder = CsvRecorder(self.temp.name, [(0, 1)], self.adc, max_data_lines=2)
+        self.addCleanup(recorder.close)
+        timestamp = datetime.now().timestamp()
+        recorder.write(timestamp, {(0, 1): 0.01})
+        recorder.write(timestamp, {(0, 1): 0.02})
+        self.assertEqual(recorder.files_created, 1)
+        self.assertEqual(len(self.rows(recorder.path)), 2)
+        recorder.write(timestamp, {(0, 1): 0.03})
+        self.assertEqual(recorder.files_created, 2)
+        self.assertEqual(len(self.rows(recorder.path)), 1)
+
     def test_sync_failure_not_counted_and_not_retried_silently(self):
         self.recorder.write(datetime.now().timestamp(), {(0, 1): 0.01})
         with patch("core.recording.os.fsync", side_effect=OSError(errno.ENOSPC, "disk full")):

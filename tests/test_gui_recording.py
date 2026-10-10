@@ -10,7 +10,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QLocale, Qt
 from core.acquisition import AcquisitionManager
 from core.recording import CsvRecorder
 from gui.main_window import MainWindow
@@ -178,6 +178,30 @@ class RecordingUiTests(unittest.TestCase):
             self.assertFalse(self.win._apply_recording_settings(options, remember=True))
         self.assertIs(self.acq.recorder, self.recorder)
         warning.assert_called_once()
+
+    def test_numeric_controls_use_ascii_digits_under_arabic_system_locale(self):
+        previous = QLocale()
+        QLocale.setDefault(QLocale("ar_EG"))
+        other = None
+        try:
+            other = MainWindow(self.acq)
+            other.rate_spin.setValue(1234)
+            self.assertEqual(other.rate_spin.cleanText(), "1,234")
+            dialog = RecordingSettingsDialog(self.recorder, other)
+            dialog.max_lines.setValue(123456)
+            dialog.min_free.setValue(5678)
+            self.assertEqual(dialog.max_lines.cleanText(), "123,456")
+            self.assertEqual(dialog.min_free.cleanText(), "5,678")
+            self.assertEqual(dialog.min_free.suffix(), "")
+            dialog.max_lines.lineEdit().setText("234,567")
+            dialog.max_lines.interpretText()
+            self.assertEqual(dialog.recording_options()["max_data_lines"], 234567)
+            self.assertEqual(other.locale().zeroDigit(), "0")
+            dialog.close()
+        finally:
+            if other is not None:
+                other.close()
+            QLocale.setDefault(previous)
 
 
 if __name__ == "__main__":
