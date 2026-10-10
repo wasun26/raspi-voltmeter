@@ -203,6 +203,134 @@ class RecordingUiTests(unittest.TestCase):
                 other.close()
             QLocale.setDefault(previous)
 
+    def test_collection_mode_stops_graph_work_without_losing_csv_rows(self):
+        self.win.show()
+        self.app.processEvents()
+        self.win.start_btn.click()
+        self.wait_for_saved(2)
+        self.assertTrue(self.win._time_buffer)
+        rate, gain = self.acq.sample_rate, self.adc.gain
+        path = self.recorder.path
+        self.win.collection_mode_action.trigger()
+        self.assertTrue(self.win._collection_mode)
+        self.assertEqual(self.win.timer.interval(), 3000)
+        self.assertFalse(self.win._plot_active)
+        self.assertFalse(self.win._time_buffer)
+        self.assertTrue(self.win.chart_dock.isHidden())
+        count = self.recorder.saved_count
+        curve = self.win.curves[(0, 1)]
+        with patch.object(curve, "setData", wraps=curve.setData) as draw, \
+             patch.object(self.win, "_downsample", wraps=self.win._downsample) as downsample:
+            self.wait_for_saved(count + 5)
+            self.win._update_ui()
+            draw.assert_not_called()
+            downsample.assert_not_called()
+        self.assertFalse(self.win._time_buffer)
+        self.assertEqual(self.acq.sample_rate, rate)
+        self.assertEqual(self.adc.gain, gain)
+        self.assertIs(self.acq.recorder, self.recorder)
+        self.win.collection_mode_action.trigger()
+        self.app.processEvents()
+        self.assertTrue(self.win._plot_active)
+        self.assertEqual(self.win.timer.interval(), 100)
+        count = self.recorder.saved_count
+        self.wait_for_saved(count + 2)
+        self.win.measurement_action.trigger()
+        self.assertTrue(self.win._time_buffer)
+        self.assertLess(self.win._time_buffer[0], 0.01)
+        self.assertEqual(self.recorder.path, path)
+        with path.open(newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        self.assertEqual([int(row["sequence"]) for row in rows], list(range(1, self.recorder.saved_count + 1)))
+
+    def test_reset_layout_preserves_collection_mode_and_recording(self):
+        self.win.show()
+        self.app.processEvents()
+        self.win.measurement_action.trigger()
+        self.wait_for_saved(2)
+        path = self.recorder.path
+        self.win.collection_mode_action.trigger()
+        self.win.recording_dock.setFloating(True)
+        self.win.recording_dock.close()
+        view_menu = self.win.menuBar().actions()[1].menu()
+        reset_action = next(action for action in view_menu.actions()
+                            if action.text() == "&Reset panel layout")
+        reset_action.trigger()
+        self.app.processEvents()
+        self.assertTrue(self.win._collection_mode)
+        self.assertTrue(self.win.collection_mode_action.isChecked())
+        self.assertEqual(self.win.timer.interval(), 3000)
+        self.assertFalse(self.win._plot_active)
+        self.assertTrue(self.win.measurement_dock.isHidden())
+        self.assertTrue(self.win.chart_dock.isHidden())
+        self.assertFalse(self.win.recording_dock.isHidden())
+        self.assertFalse(self.win.recording_dock.isFloating())
+        self.assertTrue(self.acq._running)
+        self.assertIs(self.acq.recorder, self.recorder)
+        self.wait_for_saved(self.recorder.saved_count + 3)
+        self.assertFalse(self.win._time_buffer)
+        self.assertEqual(self.recorder.path, path)
+        self.win.collection_mode_action.trigger()
+        self.app.processEvents()
+        for dock in (self.win.measurement_dock, self.win.recording_dock, self.win.chart_dock):
+            self.assertFalse(dock.isHidden())
+            self.assertFalse(dock.isFloating())
+        self.win.measurement_action.trigger()
+        with path.open(newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        self.assertEqual([int(row["sequence"]) for row in rows],
+                         list(range(1, self.recorder.saved_count + 1)))
+
+    def test_hidden_and_minimized_graph_skip_work_and_restore(self):
+        self.win.show()
+        self.app.processEvents()
+        self.assertTrue(self.win._plot_active)
+        self.win.chart_dock.close()
+        self.app.processEvents()
+        self.assertFalse(self.win._plot_active)
+        self.win._on_data(time.time(), {(0, 1): 0.01})
+        self.assertFalse(self.win._time_buffer)
+        self.assertEqual(self.win.timer.interval(), 3000)
+        self.win.chart_dock.show()
+        self.app.processEvents()
+        self.assertTrue(self.win._plot_active)
+        self.win.showMinimized()
+        self.app.processEvents()
+        self.assertFalse(self.win._plot_active)
+        self.win.showNormal()
+        self.app.processEvents()
+        self.assertTrue(self.win._plot_active)
+        self.win.tabifyDockWidget(self.win.recording_dock, self.win.chart_dock)
+        self.win.recording_dock.raise_()
+        self.app.processEvents()
+        self.assertFalse(self.win._plot_active)
+        self.win.chart_dock.raise_()
+        self.app.processEvents()
+        self.assertTrue(self.win._plot_active)
+
+    def test_collection_mode_reports_storage_failure_without_waiting_for_timer(self):
+        self.win.show()
+        self.win.collection_mode_action.trigger()
+        with patch.object(self.recorder, "write", side_effect=OSError("disk full")):
+            self.win.measurement_action.trigger()
+            self.acq._thread.join(timeout=2)
+        # Process the queued error signal; do not manually refresh or wait 3s.
+        self.app.processEvents()
+        self.assertIn("disk full", self.win.recording_label.text())
+        self.assertFalse(self.win.measurement_action.isEnabled())
+        self.assertFalse(self.acq._running)
+
+    def test_collection_mode_can_be_enabled_on_startup(self):
+        other = MainWindow(self.acq, collection_mode=True)
+        try:
+            other.show()
+            self.app.processEvents()
+            self.assertTrue(other._collection_mode)
+            self.assertFalse(other._plot_active)
+            self.assertEqual(other.timer.interval(), 3000)
+        finally:
+            other.close()
+
 
 if __name__ == "__main__":
     unittest.main()

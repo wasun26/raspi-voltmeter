@@ -202,6 +202,31 @@ Western Arabic digits `0–9` regardless of the system locale.
 Numeric input fields show commas as thousands separators (for example `100,000`).
 Units such as Hz, rows and MiB appear next to the field, outside the editable text.
 
+### Data collection mode
+
+Use the **Data collection mode** toolbar button, **File > Data collection mode**,
+or `Ctrl+M` for unattended GUI recording. The Measurement and Voltage trend panels
+are hidden; Save data keeps the saved count, latest time, file and disk status.
+The toolbar still provides start/pause, and the status bar identifies real/mock
+ADC data. UI refresh slows from 100 ms to 3 seconds. Graph buffers are cleared,
+no new plot points are prepared, and graph downsampling/redrawing stops.
+The ADC rate, gain, CSV sequence, rotation and flush/fsync policy stay unchanged.
+The first ADC error or a fatal recording error wakes the UI immediately.
+
+**Return to live view** restores the previous panel arrangement and starts fresh
+display history; data recorded during collection mode stays in CSV. A closed,
+inactive-tab or minimized graph also stops buffering/drawing, and resumes with
+fresh history when visible. Unchanged graph data is not redrawn on every timer
+tick. Reset panel layout restores panel positions while preserving the current
+mode; in collection mode only Save data remains visible.
+
+For GUI startup in this mode, set `collection_mode_on_start = True` in `config.py`.
+`collection_ui_refresh_ms` sets its status interval (default 3000 ms, minimum
+1000 ms). Mode controls are unavailable when CSV recording is disabled.
+This reduces GUI work; power and temperature savings require measurement on the
+actual Pi. It does not turn off the display or desktop automatically. For a site
+without a display, the terminal `--quiet` service avoids creating the GUI entirely.
+
 Successfully synced data relies on the storage device honoring sync requests.
 Power loss during an unfinished write can leave an incomplete last row; discard
 that row when analyzing. A restart writes a new file and preserves old files.

@@ -3,7 +3,7 @@ from collections import deque
 from datetime import datetime
 import threading
 
-from PyQt6.QtCore import QLocale, Qt, QTimer, QUrl
+from PyQt6.QtCore import QEvent, QLocale, Qt, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QAction, QDesktopServices, QFont
 from PyQt6.QtWidgets import (
     QApplication,
@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QSpinBox,
     QTabWidget,
+    QToolBar,
     QVBoxLayout,
     QWidget,
 )
@@ -32,17 +33,21 @@ from gui.recording_settings import RecordingSettingsDialog
 
 
 class MainWindow(QMainWindow):
+    _error_received = pyqtSignal()
+
     def __init__(
         self,
         acquisition_manager,
         plot_window_sec: int = 60,
         plot_max_points: int = 2000,
+        collection_mode: bool = False,
+        collection_ui_refresh_ms: int = 3000,
     ):
         super().__init__()
         self.setLocale(QLocale.c())
         self.setWindowTitle("Voltmeter - PyQt")
         self.resize(960, 760)
-        self.setMinimumSize(720, 620)
+        self.setMinimumSize(720, 740)
         self.acq = acquisition_manager
         self.acq.add_callback(self._on_data)
 
@@ -59,15 +64,27 @@ class MainWindow(QMainWindow):
         self._last = None
         self._last_error = None
         self._error_count = 0
+        self._collection_mode = False
+        self._collection_ui_refresh_ms = max(1000, int(collection_ui_refresh_ms))
+        self._monitor_layout = None
+        self._plot_active = False
+        self._chart_presented = False
+        self._plot_revision = 0
+        self._last_plot_revision = -1
+        self._closing = False
 
         self._setup_ui()
         self._setup_menus()
-        self._update_ui()
-
         self.timer = QTimer()
         self.timer.setInterval(100)
         self.timer.timeout.connect(self._update_ui)
+        self._error_received.connect(self._update_ui)
+        self.chart_dock.visibilityChanged.connect(self._on_chart_visibility_changed)
         self.timer.start()
+        self._refresh_plot_state()
+        self._update_ui()
+        if collection_mode:
+            self.collection_mode_action.setChecked(True)
 
     def _setup_ui(self):
         w = QWidget()
@@ -211,6 +228,7 @@ class MainWindow(QMainWindow):
         hint.setStyleSheet("color: #666; font-size: 11px;")
         recording_layout.addWidget(hint, 6, 0, 1, 3)
         recording_layout.setColumnStretch(1, 1)
+        recording_layout.setRowStretch(7, 1)
         self.recording_dock = self._create_dock("Save data", "recording_dock", recording_group)
 
         # Plot
@@ -258,6 +276,14 @@ class MainWindow(QMainWindow):
             [self.measurement_dock, self.recording_dock, self.chart_dock],
             [220, 210, 280], Qt.Orientation.Vertical,
         )
+        if self._collection_mode:
+            # Return to the reset layout when live view is requested later.
+            self._monitor_layout = self.saveState()
+            self.measurement_dock.hide()
+            self.chart_dock.hide()
+            self.recording_dock.show()
+            self.recording_dock.raise_()
+        self._refresh_plot_state()
 
     def _setup_menus(self):
         menu_bar = self.menuBar()
@@ -278,12 +304,29 @@ class MainWindow(QMainWindow):
         self.copy_path_action = action(file_menu, "&Copy file path", self._copy_log_path, "Ctrl+Shift+C")
         self.recording_settings_action = action(file_menu, "Recording &settings…", self._show_recording_settings, "Ctrl+,")
         file_menu.addSeparator()
+        self.collection_mode_action = QAction("Data collection mode", self)
+        self.collection_mode_action.setCheckable(True)
+        self.collection_mode_action.setShortcut("Ctrl+M")
+        self.collection_mode_action.setToolTip("Keep recording every reading; stop graph work and update status slowly.")
+        self.collection_mode_action.toggled.connect(self._set_collection_mode)
+        file_menu.addAction(self.collection_mode_action)
+        file_menu.addSeparator()
         action(file_menu, "E&xit", self.close, "Ctrl+Q")
 
         self.measurement_action = QAction(self)
         self.measurement_action.setShortcut("Ctrl+Space")
         self.measurement_action.triggered.connect(self._toggle)
         self.addAction(self.measurement_action)
+
+        mode_toolbar = QToolBar("Recording controls", self)
+        mode_toolbar.setObjectName("recording_controls_toolbar")
+        mode_toolbar.setMovable(False)
+        mode_toolbar.addAction(self.collection_mode_action)
+        mode_toolbar.addSeparator()
+        mode_toolbar.addAction(self.measurement_action)
+        self.addToolBar(mode_toolbar)
+        self.mode_label = QLabel()
+        self.statusBar().addWidget(self.mode_label, 1)
 
         view_menu = menu_bar.addMenu("&View")
         self.recording_panel_action = self.recording_dock.toggleViewAction()
@@ -316,8 +359,63 @@ class MainWindow(QMainWindow):
             self._time_buffer.clear()
             for buffer in self.buffers.values():
                 buffer.clear()
+            self._plot_revision += 1
             for curve in self.curves.values():
                 curve.setData([], [])
+
+    def _refresh_plot_state(self, *_):
+        active = (not self._collection_mode and not self._closing
+                  and self._chart_presented and not self.isMinimized())
+        with self._data_lock:
+            changed = active != self._plot_active
+            self._plot_active = active
+            if changed:
+                self._start_ts = None
+                self._time_buffer.clear()
+                for buffer in self.buffers.values():
+                    buffer.clear()
+                self._plot_revision += 1
+        if changed:
+            for curve in self.curves.values():
+                curve.setData([], [])
+        if not self._collection_mode:
+            self.timer.setInterval(100 if active else self._collection_ui_refresh_ms)
+
+    def _on_chart_visibility_changed(self, visible):
+        # In a tab group this signal reports the presented tab, unlike isVisible().
+        self._chart_presented = visible
+        self._refresh_plot_state()
+
+    def _set_collection_mode(self, enabled):
+        if enabled and self.acq.recorder is None:
+            self.collection_mode_action.blockSignals(True)
+            self.collection_mode_action.setChecked(False)
+            self.collection_mode_action.blockSignals(False)
+            return
+        self._collection_mode = enabled
+        self.setMinimumHeight(360 if enabled else 740)
+        if enabled:
+            self._monitor_layout = self.saveState()
+            self.measurement_dock.hide()
+            self.chart_dock.hide()
+            self.recording_dock.show()
+            self.recording_dock.raise_()
+            self.timer.setInterval(self._collection_ui_refresh_ms)
+        elif self._monitor_layout is not None:
+            self.restoreState(self._monitor_layout)
+            self._monitor_layout = None
+        self.chart_dock.toggleViewAction().setEnabled(not enabled)
+        self.measurement_dock.toggleViewAction().setEnabled(not enabled)
+        self.rate_spin.setEnabled(not enabled)
+        self.gain_combo.setEnabled(not enabled)
+        self.collection_mode_action.setText("Return to live view" if enabled else "Data collection mode")
+        self._refresh_plot_state()
+        self._update_ui()
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange and hasattr(self, "timer"):
+            self._refresh_plot_state()
 
     def _set_full_screen(self, enabled):
         self.exit_full_screen_action.setEnabled(enabled)
@@ -339,6 +437,8 @@ class MainWindow(QMainWindow):
             "Reaching a row limit continues in a new file; low disk space stops acquisition.\n\n"
             "File > Open recording folder (Ctrl+O) opens the saved files. "
             "Clear graph (Ctrl+R) clears display history only.\n\n"
+            "Data collection mode (Ctrl+M) stops graph work and updates status every few seconds. "
+            "ADC readings and CSV syncing continue unchanged. Return to live view starts a new graph history.\n\n"
             "Drag a panel title to move it, dock it at an edge, or stack panels as tabs. "
             "Double-click its title to detach or dock it. "
             "View reopens closed panels; Reset panel layout restores the original arrangement. "
@@ -355,12 +455,17 @@ class MainWindow(QMainWindow):
 
     def _on_data(self, ts, readings):
         if isinstance(readings, Exception):
+            notify = self._last_error is None or self.acq.recording_error is readings
             self._last_error = readings
             self._error_count += 1
+            if notify and not self._closing:
+                self._error_received.emit()
         else:
             self._last = readings
             self._last_error = None
             with self._data_lock:
+                if not self._plot_active:
+                    return
                 if self._start_ts is None:
                     self._start_ts = ts
                 rel_ts = ts - self._start_ts
@@ -369,9 +474,17 @@ class MainWindow(QMainWindow):
                     self.buffers.setdefault(
                         ch, deque(maxlen=self._calc_maxlen())
                     ).append(v)
+                self._plot_revision += 1
 
     def _update_ui(self):
+        if self._closing:
+            return
         self._update_recording_ui()
+        source = type(self.acq.adc).__name__
+        if source == "MockAdc":
+            source += " / SIMULATED DATA"
+        mode = "Data collection: graph off" if self._collection_mode else "Live view" if self._plot_active else "Graph inactive"
+        self.mode_label.setText(f"{mode} | {source} | Status refresh: {self.timer.interval() / 1000:g} s")
         if self._last_error is not None:
             self.voltage_label.setText("ERROR")
             self.voltage_label.setStyleSheet(
@@ -395,12 +508,15 @@ class MainWindow(QMainWindow):
             self.status_label.setText("Waiting for data..." if self.acq._running else "Ready to start")
 
         with self._data_lock:
+            if not self._plot_active or self._plot_revision == self._last_plot_revision:
+                return
+            self._last_plot_revision = self._plot_revision
             times = list(self._time_buffer)
-            for ch, curve in self.curves.items():
-                data = list(self.buffers.get(ch, []))
-                if data and times:
-                    x, y = self._downsample(times, data)
-                    curve.setData(x, [value * 1000.0 for value in y])
+            snapshots = {ch: list(self.buffers.get(ch, [])) for ch in self.curves}
+        for ch, data in snapshots.items():
+            if data and times:
+                x, y = self._downsample(times, data)
+                self.curves[ch].setData(x, [value * 1000.0 for value in y])
 
     def _update_recording_ui(self):
         recorder = self.acq.recorder
@@ -417,6 +533,7 @@ class MainWindow(QMainWindow):
         self.change_folder_action.setEnabled(self.change_folder_btn.isEnabled())
         self.copy_path_action.setEnabled(self.copy_path_btn.isEnabled())
         self.measurement_action.setEnabled(not failed)
+        self.collection_mode_action.setEnabled(recorder is not None)
         self.measurement_action.setText("&Pause measurement" if running else "&Start measurement")
         if failed:
             self.recording_dock.show()
@@ -626,6 +743,8 @@ class MainWindow(QMainWindow):
         return x_vals[::step], y_vals[::step]
 
     def closeEvent(self, event):
+        self._closing = True
+        self._refresh_plot_state()
         self.timer.stop()
         self.acq.stop()
         if self.acq.recorder is not None:

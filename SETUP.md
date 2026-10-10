@@ -226,6 +226,11 @@ python serial_monitor.py --mock --rate 5 --count 5
 
 ## Unattended recording on Raspberry Pi OS
 
+For an attached-display GUI deployment, use **Data collection mode** (`Ctrl+M`)
+to stop graph work and refresh status every 3 seconds while CSV recording
+continues. Set `collection_mode_on_start` to `True` in `config.py` to enter it at
+startup. With no display, use the terminal service below to avoid GUI overhead.
+
 Verify CSV output before installing the service:
 
 ```bash

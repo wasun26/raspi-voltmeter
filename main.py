@@ -78,6 +78,8 @@ def main():
         acquisition_manager=acq,
         plot_window_sec=DEFAULT.get("plot_window_sec", 60),
         plot_max_points=DEFAULT.get("plot_max_points", 2000),
+        collection_mode=DEFAULT.get("collection_mode_on_start", False),
+        collection_ui_refresh_ms=DEFAULT.get("collection_ui_refresh_ms", 3000),
     )
     win.show()
 
