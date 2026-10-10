@@ -74,6 +74,9 @@ python main.py
 
 On non-Raspberry Pi machines, `main.py` and `serial_monitor.py` use `MockAdc` when `config.py` has `adc.type = "auto"`.
 
+On Windows, double-click `run_voltmeter.bat` to open the GUI using the project's
+virtual environment, or run `.\.venv\Scripts\python.exe -B main.py` in PowerShell.
+
 ## Useful Commands
 
 Run terminal monitor with mock ADC:
@@ -99,6 +102,51 @@ Run the GUI:
 ```bash
 python main.py
 ```
+
+## Continuous CSV Recording
+
+Recording is enabled by default in both the GUI and terminal monitor via
+`log_enabled` and `log_dir` in `config.py`. Each acquired reading (or averaged
+reading when averaging is enabled) is written before it is displayed. Each write
+uses `flush()` and `os.fsync()` before being counted as saved. No in-memory queue
+builds up: slow storage reduces the effective acquisition rate. This records
+software readings, not every ADC conversion at the configured hardware SPS.
+
+CSV files have unique session names, rotate on the local calendar day, and never
+overwrite existing files. Columns include time with timezone, Unix time, monotonic
+elapsed seconds, sequence number, actual ADC class (`ADS1256` or `MockAdc`), input
+mode, gain, Vref, averaging count, and mV columns such as `AD0-AD1_mV`.
+Old CSV files are not deleted automatically.
+
+Test recording without hardware:
+
+```bash
+python serial_monitor.py --mock --rate 5 --count 5
+```
+
+Run unattended on Raspberry Pi with real hardware (Ctrl+C stops after the pending
+write finishes; omit `--count` to run indefinitely):
+
+```bash
+python serial_monitor.py --adc ads1256 --channels 0-1 --rate 30 --quiet --log-dir /path/to/data
+```
+
+Use `--adc ads1256` at the test site so missing hardware fails instead of recording
+mock measurements. `auto` retains its mock fallback, which is labeled in the CSV.
+`--no-log` disables terminal recording; `--log-dir` selects its destination.
+The GUI shows the CSV path and number of successfully synced samples; a recording
+error stops acquisition and stays visible until restart. The terminal exits with
+status 1 on write/sync errors, including a full or inaccessible drive.
+
+Successfully synced data relies on the storage device honoring sync requests.
+Power loss during an unfinished write can leave an incomplete last row; discard
+that row when analyzing. A restart writes a new file and preserves old files.
+This does not protect against drive failure. Validate actual power-cut recovery
+on the intended Pi/drive before a month-long test, and provide enough free space
+and a separate backup if required. At 30 rows/s and 200 bytes/row, budget roughly
+15.6 GB per 30 days; actual size and rate depend on the data and storage.
+
+For startup after a reboot, see `voltmeter.service.example` and SETUP.md.
 
 ## Project Layout
 

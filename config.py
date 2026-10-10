@@ -23,5 +23,6 @@ DEFAULT = {
     "plot_window_sec": 60,
     "plot_max_points": 2000,
     "log_enabled": True,
+    # CSV is synced after every sample. Use an absolute path for an external drive.
     "log_dir": "logs",
 }

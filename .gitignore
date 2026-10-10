@@ -29,5 +29,3 @@ logs/
 *.log
 *.bak
 *.tmp
-
-core/

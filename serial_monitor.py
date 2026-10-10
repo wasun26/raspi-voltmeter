@@ -1,10 +1,13 @@
 """Terminal monitor for Raspberry Pi OS ADS1256 hardware or mock ADC."""
 import argparse
+import signal
 import sys
+import threading
 import time
 
 from config import DEFAULT
 from hardware.adc import MockAdc
+from core.recording import CsvRecorder
 
 try:
     from hardware.adc import ADS1256
@@ -135,7 +138,15 @@ def main():
                         help="Skip ADS1256 chip ID validation while debugging SPI/CS wiring")
     parser.add_argument("--count", type=int, default=0,
                         help="Number of samples to read (0=run forever)")
+    parser.add_argument("--log-dir", default=DEFAULT.get("log_dir", "logs"),
+                        help="CSV directory (default: logs); each row is flushed and fsynced")
+    parser.add_argument("--no-log", action="store_true",
+                        help="Disable CSV recording")
+    parser.add_argument("--quiet", action="store_true",
+                        help="Print startup/errors only, suitable for unattended recording")
     args = parser.parse_args()
+    if args.rate <= 0 or args.averaging < 1 or args.count < 0:
+        parser.error("rate and averaging must be positive; count must be nonnegative")
 
     adc_cfg = dict(DEFAULT.get("adc", {}))
     adc_cfg["sample_rate"] = args.rate
@@ -152,6 +163,8 @@ def main():
     if args.no_chip_id_check:
         adc_cfg["validate_chip_id"] = False
     channels = [parse_channel(x) for x in args.channels.split(",") if x.strip()]
+    if not channels:
+        parser.error("at least one channel is required")
 
     adc = None
     try:
@@ -196,8 +209,20 @@ def main():
 
     period = 1.0 / args.rate if args.rate > 0 else 0.1
     count = 0
+    recorder = None
+    recording_failed = False
+    stop_requested = threading.Event()
+    old_handlers = {}
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        old_handlers[sig] = signal.signal(sig, lambda *_: stop_requested.set())
     try:
-        while True:
+        if DEFAULT.get("log_enabled", True) and not args.no_log:
+            recording_failed = True
+            recorder = CsvRecorder(args.log_dir, channels, adc, args.averaging)
+            recording_failed = False
+            print(f"CSV directory: {recorder.directory} (flush + fsync every sample)")
+        while not stop_requested.is_set():
+            started = time.monotonic()
             ts = time.time()
             readings = []
             for ch in channels:
@@ -210,27 +235,44 @@ def main():
                     v = s / args.averaging
                 readings.append((ch, v))
 
+            if recorder is not None:
+                recording_failed = True
+                recorder.write(ts, dict(readings))
+                recording_failed = False
+                if count == 0:
+                    print(f"CSV file: {recorder.path}")
+
             parts = [
                 f"{format_channel(ch)}: {v * scale:.{decimals}f} {unit}" for ch, v in readings]
-            print(f"{ts:.3f} | " + " | ".join(parts))
+            if not args.quiet:
+                print(f"{ts:.3f} | " + " | ".join(parts))
 
             count += 1
             if args.count > 0 and count >= args.count:
                 break
 
-            elapsed = time.time() - ts
+            elapsed = time.monotonic() - started
             to_sleep = period - elapsed
             if to_sleep > 0:
-                time.sleep(to_sleep)
+                stop_requested.wait(to_sleep)
     except KeyboardInterrupt:
         print("\nStopped.")
     except Exception as exc:
-        print(f"\nERROR: read failed: {exc}", file=sys.stderr)
+        operation = "recording" if recording_failed else "read"
+        print(f"\nERROR: {operation} failed; acquisition stopped: {exc}", file=sys.stderr)
         return 1
     finally:
-        if adc is not None and hasattr(adc, "close"):
-            adc.close()
+        for sig, handler in old_handlers.items():
+            signal.signal(sig, handler)
+        try:
+            if recorder is not None:
+                recorder.close()
+        finally:
+            if adc is not None and hasattr(adc, "close"):
+                adc.close()
 
+    if recorder is not None:
+        print(f"Saved {recorder.saved_count} samples. Last CSV: {recorder.path}")
     return 0
 
 

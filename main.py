@@ -4,6 +4,7 @@ from PyQt6.QtWidgets import QApplication
 from config import DEFAULT
 from hardware.adc import MockAdc
 from core.acquisition import AcquisitionManager
+from core.recording import CsvRecorder
 from gui.main_window import MainWindow
 
 try:
@@ -54,11 +55,16 @@ def create_adc(adc_cfg):
 def main():
     adc = create_adc(DEFAULT.get("adc", {}))
     print(f"[main] ADC in use: {adc.__class__.__name__}")
+    recorder = CsvRecorder(
+        DEFAULT.get("log_dir", "logs"), DEFAULT.get("channels", [0]), adc,
+        DEFAULT.get("averaging", 1),
+    ) if DEFAULT.get("log_enabled", True) else None
     acq = AcquisitionManager(
         adc_device=adc,
         channels=DEFAULT.get("channels", [0]),
         sample_rate=DEFAULT.get("sample_rate", 20),
         averaging=DEFAULT.get("averaging", 1),
+        recorder=recorder,
     )
 
     print("[main] Before QApplication()")
@@ -68,13 +74,19 @@ def main():
         acquisition_manager=acq,
         plot_window_sec=DEFAULT.get("plot_window_sec", 60),
         plot_max_points=DEFAULT.get("plot_max_points", 2000),
-        log_enabled=DEFAULT.get("log_enabled", True),
-        log_dir=DEFAULT.get("log_dir", "logs"),
     )
     win.show()
 
     acq.start()
-    sys.exit(app.exec())
+    try:
+        result = app.exec()
+    finally:
+        acq.stop()
+        if recorder is not None:
+            recorder.close()
+        if hasattr(adc, "close"):
+            adc.close()
+    sys.exit(result)
 
 
 if __name__ == "__main__":

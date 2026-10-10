@@ -1,8 +1,5 @@
 """Main PyQt6 window for the voltmeter UI with large voltage display and error handling."""
 from collections import deque
-from datetime import datetime
-import csv
-import os
 import threading
 
 from PyQt6.QtCore import Qt, QTimer
@@ -27,8 +24,6 @@ class MainWindow(QMainWindow):
         acquisition_manager,
         plot_window_sec: int = 60,
         plot_max_points: int = 2000,
-        log_enabled: bool = True,
-        log_dir: str = "logs",
     ):
         super().__init__()
         self.setWindowTitle("Voltmeter - PyQt")
@@ -48,13 +43,6 @@ class MainWindow(QMainWindow):
         self._last = None
         self._last_error = None
         self._error_count = 0
-
-        self._log_enabled = bool(log_enabled)
-        self._log_dir = log_dir
-        self._log_file = None
-        self._log_writer = None
-        self._log_header_written = False
-        self._init_logging()
 
         self._setup_ui()
 
@@ -93,6 +81,10 @@ class MainWindow(QMainWindow):
         self.status_label.setFont(status_font)
         self.status_label.setStyleSheet("color: #666; padding: 10px;")
         display_layout.addWidget(self.status_label)
+        self.recording_label = QLabel("Recording: waiting for first sample")
+        self.recording_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.recording_label.setWordWrap(True)
+        display_layout.addWidget(self.recording_label)
 
         v.addLayout(display_layout)
 
@@ -162,9 +154,21 @@ class MainWindow(QMainWindow):
                     self.buffers.setdefault(
                         ch, deque(maxlen=self._calc_maxlen())
                     ).append(v)
-                self._log_reading(ts, rel_ts, readings)
 
     def _update_ui(self):
+        recorder = self.acq.recorder
+        if self.acq.recording_error is not None:
+            self.recording_label.setText(str(self.acq.recording_error))
+            self.recording_label.setStyleSheet("color: #C62828; font-weight: bold;")
+            self.start_btn.setEnabled(False)
+            self.start_btn.setText("Stopped")
+        elif recorder is not None:
+            self.recording_label.setText(
+                f"{type(self.acq.adc).__name__} | Saved: {recorder.saved_count} | "
+                f"CSV: {recorder.path or recorder.directory}"
+            )
+        else:
+            self.recording_label.setText("Recording disabled")
         if self._last_error is not None:
             # Show error
             self.voltage_label.setText("ERROR")
@@ -304,35 +308,9 @@ class MainWindow(QMainWindow):
         step = max(1, int(len(x_vals) / self.plot_max_points))
         return x_vals[::step], y_vals[::step]
 
-    def _init_logging(self):
-        if not self._log_enabled:
-            return
-        os.makedirs(self._log_dir, exist_ok=True)
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"voltmeter_{stamp}.csv"
-        path = os.path.join(self._log_dir, filename)
-        self._log_file = open(path, "w", newline="", encoding="utf-8")
-        self._log_writer = csv.writer(self._log_file)
-
-    def _log_reading(self, ts, rel_ts, readings):
-        if not self._log_enabled or self._log_writer is None:
-            return
-        if not self._log_header_written:
-            header = ["timestamp", "elapsed_s"] + \
-                [f"ch{ch}" for ch in readings.keys()]
-            self._log_writer.writerow(header)
-            self._log_header_written = True
-        iso_ts = datetime.fromtimestamp(ts).isoformat()
-        row = [iso_ts, f"{rel_ts:.6f}"] + \
-            [f"{readings[ch]:.6f}" for ch in readings.keys()]
-        self._log_writer.writerow(row)
-        self._log_file.flush()
-
     def closeEvent(self, event):
-        if self._log_file:
-            try:
-                self._log_file.flush()
-                self._log_file.close()
-            except Exception:
-                pass
+        self.timer.stop()
+        self.acq.stop()
+        if self.acq.recorder is not None:
+            self.acq.recorder.close()
         event.accept()

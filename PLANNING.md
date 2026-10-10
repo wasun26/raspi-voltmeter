@@ -57,6 +57,14 @@ Expected result:
 
 ## Follow-Up Work
 
+Durable CSV recording now runs in the acquisition path and terminal monitor:
+flush/fsync per reading, daily/session file separation, explicit ADC source and
+mV units, stop on recording failure, and graceful shutdown before file closure.
+`voltmeter.service.example` provides opt-in unattended startup on Raspberry Pi OS.
+Mock tests cover rotation, session preservation, sync failures, and shutdown.
+Real hardware, month-long operation, and abrupt power-loss testing remain site
+validation tasks.
+
 - Validate with real ADS1256 hardware.
 - Add calibration support.
 - Add lightweight tests for mock ADC and config-driven ADC creation.

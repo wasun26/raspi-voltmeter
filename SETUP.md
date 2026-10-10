@@ -223,3 +223,38 @@ Use mock mode:
 ```bash
 python serial_monitor.py --mock --rate 5 --count 5
 ```
+
+## Unattended recording on Raspberry Pi OS
+
+Verify CSV output before installing the service:
+
+```bash
+python serial_monitor.py --adc ads1256 --channels 0-1 --rate 30 --count 10
+```
+
+CSV files are in `logs/` by default. Confirm that `adc_source` is `ADS1256` and
+that the `AD0-AD1_mV` column has ten data rows.
+
+Edit `voltmeter.service.example`: replace `User=pi`, `WorkingDirectory`, the Python
+path, and `--log-dir` with actual absolute paths. The user must have GPIO/SPI access
+and write permission to the recording directory. For an external drive, configure
+its mount and enable the matching `RequiresMountsFor` line so the service waits
+for that drive instead of writing into an unmounted directory.
+
+```bash
+sudo cp voltmeter.service.example /etc/systemd/system/voltmeter.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now voltmeter.service
+systemctl status voltmeter.service
+journalctl -u voltmeter.service -f
+```
+
+Do not run the GUI and service against the ADC simultaneously. Stop the service
+with `sudo systemctl stop voltmeter.service` before manual hardware tests.
+The service starts after reboot and retries failed runs every ten seconds; each
+run creates new files. Check storage capacity for the whole deployment.
+
+Before deployment, test stopping/restarting and abruptly removing power on the
+actual storage setup. Previously synced rows should remain readable; an unfinished
+last row may be incomplete. The local development tests do not validate Linux
+directory syncing, SD-card behavior, or real power-loss recovery.
