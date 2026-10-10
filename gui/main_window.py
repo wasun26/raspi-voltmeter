@@ -4,9 +4,10 @@ from datetime import datetime
 import threading
 
 from PyQt6.QtCore import Qt, QTimer, QUrl
-from PyQt6.QtGui import QDesktopServices, QFont
+from PyQt6.QtGui import QAction, QDesktopServices, QFont
 from PyQt6.QtWidgets import (
     QApplication,
+    QDockWidget,
     QFileDialog,
     QGridLayout,
     QGroupBox,
@@ -18,6 +19,7 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QComboBox,
     QSpinBox,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -55,6 +57,8 @@ class MainWindow(QMainWindow):
         self._error_count = 0
 
         self._setup_ui()
+        self._setup_menus()
+        self._update_ui()
 
         self.timer = QTimer()
         self.timer.setInterval(100)
@@ -63,7 +67,17 @@ class MainWindow(QMainWindow):
 
     def _setup_ui(self):
         w = QWidget()
-        self.setCentralWidget(w)
+        # All three work areas are docks so each can be moved or tabified.
+        center = QWidget()
+        self.setCentralWidget(center)
+        center.hide()
+        self.setDockOptions(
+            QMainWindow.DockOption.AllowNestedDocks
+            | QMainWindow.DockOption.AllowTabbedDocks
+            | QMainWindow.DockOption.AnimatedDocks
+            | QMainWindow.DockOption.GroupedDragging
+        )
+        self.setTabPosition(Qt.DockWidgetArea.AllDockWidgetAreas, QTabWidget.TabPosition.North)
         v = QVBoxLayout()
         v.setContentsMargins(16, 12, 16, 12)
         v.setSpacing(10)
@@ -141,8 +155,10 @@ class MainWindow(QMainWindow):
         control_layout.addStretch()
 
         v.addLayout(control_layout)
+        self.measurement_dock = self._create_dock("Measurement", "measurement_dock", w)
 
-        recording_group = QGroupBox("Save data — CSV")
+        recording_group = QGroupBox()
+        self.recording_group = recording_group
         recording_layout = QGridLayout(recording_group)
         recording_layout.setContentsMargins(12, 12, 12, 12)
         recording_layout.setHorizontalSpacing(12)
@@ -182,14 +198,15 @@ class MainWindow(QMainWindow):
         hint.setStyleSheet("color: #666; font-size: 11px;")
         recording_layout.addWidget(hint, 5, 0, 1, 3)
         recording_layout.setColumnStretch(1, 1)
-        v.addWidget(recording_group)
+        self.recording_dock = self._create_dock("Save data", "recording_dock", recording_group)
 
         # Plot
         self.plot_widget = create_plot_widget()
+        self.plot_widget.setMinimumHeight(160)
         self.plot_widget.setLabel("left", "Voltage", units="mV")
         self.plot_widget.setLabel("bottom", "Time", units="s")
         self.plot_widget.setTitle("Voltage Trend")
-        v.addWidget(self.plot_widget, 1)
+        self.chart_dock = self._create_dock("Voltage trend", "chart_dock", self.plot_widget)
 
         self.curves = {}
         colors = ["#FF5722", "#2196F3", "#4CAF50",
@@ -198,6 +215,126 @@ class MainWindow(QMainWindow):
             pen = make_pen(color=colors[i % len(colors)], width=2)
             self.curves[ch] = self.plot_widget.plot(
                 pen=pen, name=self._format_channel(ch))
+
+        self.splitDockWidget(self.measurement_dock, self.recording_dock, Qt.Orientation.Vertical)
+        self.splitDockWidget(self.recording_dock, self.chart_dock, Qt.Orientation.Vertical)
+        self.resizeDocks(
+            [self.measurement_dock, self.recording_dock, self.chart_dock],
+            [220, 210, 280], Qt.Orientation.Vertical,
+        )
+        self._default_dock_state = self.saveState()
+
+    def _create_dock(self, title, name, content):
+        dock = QDockWidget(title, self)
+        dock.setObjectName(name)
+        dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
+        dock.setFeatures(
+            QDockWidget.DockWidgetFeature.DockWidgetMovable
+            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
+            | QDockWidget.DockWidgetFeature.DockWidgetClosable
+        )
+        dock.setWidget(content)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, dock)
+        return dock
+
+    def _reset_panel_layout(self):
+        self.restoreState(self._default_dock_state)
+        for dock in (self.measurement_dock, self.recording_dock, self.chart_dock):
+            dock.show()
+        self.resizeDocks(
+            [self.measurement_dock, self.recording_dock, self.chart_dock],
+            [220, 210, 280], Qt.Orientation.Vertical,
+        )
+
+    def _setup_menus(self):
+        menu_bar = self.menuBar()
+        # Keep the menu inside the window on Raspberry Pi OS and Windows.
+        menu_bar.setNativeMenuBar(False)
+
+        def action(menu, text, callback, shortcut=None):
+            item = QAction(text, self)
+            if shortcut is not None:
+                item.setShortcut(shortcut)
+            item.triggered.connect(callback)
+            menu.addAction(item)
+            return item
+
+        file_menu = menu_bar.addMenu("&File")
+        self.open_folder_action = action(file_menu, "&Open recording folder", self._open_log_folder, "Ctrl+O")
+        self.change_folder_action = action(file_menu, "&Change recording folder…", self._choose_log_folder, "Ctrl+Shift+O")
+        self.copy_path_action = action(file_menu, "&Copy file path", self._copy_log_path, "Ctrl+Shift+C")
+        file_menu.addSeparator()
+        action(file_menu, "E&xit", self.close, "Ctrl+Q")
+
+        self.measurement_action = QAction(self)
+        self.measurement_action.setShortcut("Ctrl+Space")
+        self.measurement_action.triggered.connect(self._toggle)
+        self.addAction(self.measurement_action)
+
+        view_menu = menu_bar.addMenu("&View")
+        self.recording_panel_action = self.recording_dock.toggleViewAction()
+        for dock in (self.measurement_dock, self.recording_dock, self.chart_dock):
+            view_menu.addAction(dock.toggleViewAction())
+        action(view_menu, "&Reset panel layout", self._reset_panel_layout)
+        view_menu.addSeparator()
+        action(view_menu, "&Clear graph", self._clear_graph, "Ctrl+R")
+        view_menu.addSeparator()
+        self.full_screen_action = QAction("&Full screen", self)
+        self.full_screen_action.setCheckable(True)
+        self.full_screen_action.setShortcut("F11")
+        self.full_screen_action.toggled.connect(self._set_full_screen)
+        view_menu.addAction(self.full_screen_action)
+        self.exit_full_screen_action = QAction(self)
+        self.exit_full_screen_action.setShortcut("Esc")
+        self.exit_full_screen_action.setEnabled(False)
+        self.exit_full_screen_action.triggered.connect(lambda: self.full_screen_action.setChecked(False))
+        self.addAction(self.exit_full_screen_action)
+
+        help_menu = menu_bar.addMenu("&Help")
+        action(help_menu, "Recording &guide", self._show_recording_guide, "F1")
+        help_menu.addSeparator()
+        action(help_menu, "&About Voltmeter", self._show_about)
+
+    def _clear_graph(self):
+        # Clear only display history; never touch saved data or its sequence.
+        with self._data_lock:
+            self._start_ts = None
+            self._time_buffer.clear()
+            for buffer in self.buffers.values():
+                buffer.clear()
+            for curve in self.curves.values():
+                curve.setData([], [])
+
+    def _set_full_screen(self, enabled):
+        self.exit_full_screen_action.setEnabled(enabled)
+        if enabled:
+            self.showFullScreen()
+        else:
+            self.showNormal()
+
+    def _show_recording_guide(self):
+        QMessageBox.information(self, "Recording guide",
+            "Readings are saved automatically to CSV in mV.\n\n"
+            "Pause measurement (Ctrl+Space) stops both reading and saving. "
+            "Start measurement resumes the current session.\n\n"
+            "To change destination, pause first, then choose File > Change recording folder. "
+            "A new session starts and existing files are kept. "
+            "Set log_dir in config.py to change the startup folder.\n\n"
+            "File > Open recording folder (Ctrl+O) opens the saved files. "
+            "Clear graph (Ctrl+R) clears display history only.\n\n"
+            "Drag a panel title to move it, dock it at an edge, or stack panels as tabs. "
+            "Double-click its title to detach or dock it. "
+            "View reopens closed panels; Reset panel layout restores the original arrangement. "
+            "Closing a panel does not stop measurement or recording.\n\n"
+            "MockAdc / SIMULATED DATA means the readings are simulated. "
+            "A recording error stops acquisition; fix storage and restart the app.")
+
+    def _show_about(self):
+        QMessageBox.about(self, "About Voltmeter",
+            "Voltmeter\n\nADS1256 differential measurement with live plotting "
+            "and automatic CSV recording.\n\n"
+            f"Current ADC: {type(self.acq.adc).__name__}\n"
+            "Built with Python and PyQt6.")
 
     def _on_data(self, ts, readings):
         if isinstance(readings, Exception):
@@ -257,6 +394,14 @@ class MainWindow(QMainWindow):
         self.change_folder_btn.setEnabled(recorder is not None and not running and not failed)
         self.open_folder_btn.setEnabled(recorder is not None)
         self.copy_path_btn.setEnabled(recorder is not None and recorder.path is not None)
+        self.open_folder_action.setEnabled(self.open_folder_btn.isEnabled())
+        self.change_folder_action.setEnabled(self.change_folder_btn.isEnabled())
+        self.copy_path_action.setEnabled(self.copy_path_btn.isEnabled())
+        self.measurement_action.setEnabled(not failed)
+        self.measurement_action.setText("&Pause measurement" if running else "&Start measurement")
+        if failed:
+            self.recording_dock.show()
+            self.recording_dock.raise_()
         if failed:
             state, color = str(self.acq.recording_error), "#C62828"
         elif recorder is None:

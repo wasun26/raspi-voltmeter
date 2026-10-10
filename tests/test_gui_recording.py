@@ -10,6 +10,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import Qt
 from core.acquisition import AcquisitionManager
 from core.recording import CsvRecorder
 from gui.main_window import MainWindow
@@ -99,6 +100,43 @@ class RecordingUiTests(unittest.TestCase):
         warning.assert_called_once()
         self.assertIs(self.acq.recorder, self.recorder)
         self.assertEqual(blocked.read_text(), "keep")
+
+    def test_movable_panels_preserve_recording_and_reset_layout(self):
+        self.win.show()
+        self.app.processEvents()
+        self.assertEqual([a.text() for a in self.win.menuBar().actions()], ["&File", "&View", "&Help"])
+        self.win.measurement_action.trigger()
+        self.wait_for_saved(2)
+        self.win.recording_dock.setFloating(True)
+        self.assertTrue(self.win.recording_dock.isFloating())
+        self.win.recording_dock.close()
+        count = self.recorder.saved_count
+        self.wait_for_saved(count + 1)
+        self.assertTrue(self.acq._running)
+        self.win.recording_dock.setFloating(False)
+        self.win.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.win.recording_dock)
+        self.win.recording_dock.show()
+        self.app.processEvents()
+        self.win.tabifyDockWidget(self.win.measurement_dock, self.win.recording_dock)
+        self.assertIn(self.win.recording_dock, self.win.tabifiedDockWidgets(self.win.measurement_dock))
+        self.win._reset_panel_layout()
+        self.app.processEvents()
+        for dock in (self.win.measurement_dock, self.win.recording_dock, self.win.chart_dock):
+            self.assertFalse(dock.isFloating())
+            self.assertFalse(dock.isHidden())
+        self.assertFalse(self.win.tabifiedDockWidgets(self.win.measurement_dock))
+        self.win.measurement_action.trigger()
+        with self.recorder.path.open(newline="") as handle:
+            self.assertEqual(len(list(csv.DictReader(handle))), self.recorder.saved_count)
+
+    def test_recording_error_reopens_closed_recording_dock(self):
+        self.win.show()
+        self.win.recording_dock.close()
+        self.assertTrue(self.win.recording_dock.isHidden())
+        self.acq.recording_error = RuntimeError("disk full")
+        self.win._update_ui()
+        self.assertFalse(self.win.recording_dock.isHidden())
+        self.assertFalse(self.win.measurement_action.isEnabled())
 
 
 if __name__ == "__main__":

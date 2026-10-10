@@ -148,6 +148,19 @@ current run; set `log_dir` in `config.py` to change the startup destination.
 The chart uses mV, matching the CSV, and mock measurements are labeled
 **SIMULATED DATA**.
 
+The menu bar provides **File** (open/change recording folder, copy path, exit),
+**View** (panels, reset layout, clear graph with `Ctrl+R`, full screen with
+`F11`/`Esc`), and **Help** (recording guide with `F1`, about). Start/pause remains
+available through the Measurement panel button or `Ctrl+Space`.
+The Measurement, Save data, and Voltage trend panels are movable `QDockWidget`
+panels: drag their titles to rearrange, resize using dividers, dock at any edge,
+or stack them as tabs. Double-click a title to float/dock its panel. Closing a
+panel hides it without stopping acquisition or saving; reopen it through View.
+**View > Reset panel layout** restores the original arrangement.
+Clearing the graph does not change CSV files or saved counts.
+Folder changes stay unavailable while measuring; storage failures disable restart
+and keep the recording panel visible.
+
 Successfully synced data relies on the storage device honoring sync requests.
 Power loss during an unfinished write can leave an incomplete last row; discard
 that row when analyzing. A restart writes a new file and preserves old files.
