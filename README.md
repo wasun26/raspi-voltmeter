@@ -137,9 +137,15 @@ python serial_monitor.py --adc ads1256 --channels 0-1 --rate 30 --quiet --log-di
 Use `--adc ads1256` at the test site so missing hardware fails instead of recording
 mock measurements. `auto` retains its mock fallback, which is labeled in the CSV.
 `--no-log` disables terminal recording; `--log-dir` selects its destination.
-The GUI shows the CSV path and number of successfully synced samples; a recording
-error stops acquisition and stays visible until restart. The terminal exits with
-status 1 on write/sync errors, including a full or inaccessible drive.
+The GUI shows the CSV path and number of successfully synced samples. On a storage
+write, sync, or low-space error, acquisition holds its current sample and retries
+at the configured interval without growing a queue. The terminal logs the outage
+and recovery even with `--quiet`. New ADC readings pause until that sample is saved;
+an outage therefore leaves a time gap in the measurements. When storage returns,
+the retry uses a new CSV file and acquisition resumes automatically. If a sync
+failed after a row reached the drive, the old file may contain an unconfirmed copy
+of that row; use timestamp and sequence when combining files. Non-storage errors
+still stop acquisition.
 
 The GUI's **Save data — CSV** panel shows saving/paused/error status, saved sample
 count, last saved time, recording folder, and current file. **Open folder** and
@@ -161,8 +167,8 @@ or stack them as tabs. Double-click a title to float/dock its panel. Closing a
 panel hides it without stopping acquisition or saving; reopen it through View.
 **View > Reset panel layout** restores the original arrangement.
 Clearing the graph does not change CSV files or saved counts.
-Folder changes stay unavailable while measuring; storage failures disable restart
-and keep the recording panel visible.
+Folder changes stay unavailable while measuring. The Save data panel stays visible
+and reports automatic retries during a storage outage.
 
 ### Recording settings
 
@@ -176,7 +182,9 @@ that session's counters, and keeps all old files.
 | File name prefix | `voltmeter` | Letters/numbers/underscore/hyphen; date, time and sequential file number are added. |
 | Max data lines / file | `100000` | Excludes the CSV header. Rotate before the next row once full; `0` disables this limit. |
 | Daily rotation | On | Rotate on the local calendar day, independently of the row limit. |
-| Minimum free drive space | `100` MiB | Check before the first write and every 5 seconds; stop acquisition below the threshold. `0` disables the reserve. Never delete old files. |
+| CSV columns | All | Keep local timestamp and at least one voltage channel; select the remaining fields. |
+| Minimum free drive space | `100` MiB | Check before the first write and every 5 seconds; pause acquisition and retry below the threshold. `0` disables the reserve. Never delete old files. |
+| Storage retry interval | `5` s | Retry the pending sample without taking new readings until it is saved. |
 | Remember settings | On | Store preferences in `recording_settings.json` in the project folder for GUI and terminal startup. |
 
 Defaults remain in `config.py`; remembered preferences override them. Unticking
@@ -189,7 +197,7 @@ automatic retention/deletion or downsampling of saved readings.
 Terminal overrides are available without changing remembered preferences:
 
 ```bash
-python serial_monitor.py --mock --count 5 --max-data-lines 2 --file-prefix site_test --min-free-mb 100
+python serial_monitor.py --mock --count 5 --max-data-lines 2 --file-prefix site_test --min-free-mb 100 --retry-seconds 5
 ```
 
 This produces three CSV files with 2, 2 and 1 data rows. A daily and a line-count
@@ -214,7 +222,8 @@ The toolbar still provides start/pause, and the status bar identifies real/mock
 ADC data. UI refresh slows from 100 ms to 3 seconds. Graph buffers are cleared,
 no new plot points are prepared, and graph downsampling/redrawing stops.
 The ADC rate, gain, CSV sequence, rotation and flush/fsync policy stay unchanged.
-The first ADC error or a fatal recording error wakes the UI immediately.
+The first ADC or storage error wakes the UI immediately; storage recovery also
+refreshes the status immediately.
 
 **Return to live view** restores the previous panel arrangement and starts fresh
 display history; data recorded during collection mode stays in CSV. A closed,
@@ -233,7 +242,11 @@ without a display, the terminal `--quiet` service avoids creating the GUI entire
 Successfully synced data relies on the storage device honoring sync requests.
 Power loss during an unfinished write can leave an incomplete last row; discard
 that row when analyzing. A restart writes a new file and preserves old files.
-This does not protect against drive failure. Validate actual power-cut recovery
+An unavailable drive cannot retain readings acquired while it is offline; the
+program pauses acquisition and holds one pending sample in memory until storage
+recovers. Pausing and resuming the GUI keeps that sample; closing the program or
+stopping the terminal process during an outage discards it.
+This does not protect against permanent drive failure. Validate actual power-cut recovery
 on the intended Pi/drive before a month-long test, and provide enough free space
 and a separate backup if required. At 30 rows/s and 200 bytes/row, budget roughly
 15.6 GB per 30 days; actual size and rate depend on the data and storage.

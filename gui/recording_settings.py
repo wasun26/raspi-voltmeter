@@ -51,11 +51,21 @@ class RecordingSettingsDialog(QDialog):
         self.min_free.setRange(0, 1000000)
         self.min_free.setSpecialValueText("No reserved space")
         self.min_free.setValue(recorder.min_free_mb)
-        self.min_free.setToolTip("Stop acquisition below this free-space threshold. Checked every 5 seconds; never delete old files.")
+        self.min_free.setToolTip("Pause acquisition below this free-space threshold and retry; never delete old files.")
         min_free_row = QHBoxLayout()
         min_free_row.addWidget(self.min_free)
         min_free_row.addWidget(QLabel("MiB"))
         form.addRow("Minimum free drive space", min_free_row)
+        self.retry_interval = QSpinBox()
+        self.retry_interval.setLocale(QLocale(QLocale.Language.English, QLocale.Country.UnitedStates))
+        self.retry_interval.setGroupSeparatorShown(True)
+        self.retry_interval.setRange(1, 3600)
+        self.retry_interval.setValue(recorder.retry_interval_sec)
+        self.retry_interval.setToolTip("Wait between automatic storage retries; no new ADC readings are taken while waiting.")
+        retry_row = QHBoxLayout()
+        retry_row.addWidget(self.retry_interval)
+        retry_row.addWidget(QLabel("s"))
+        form.addRow("Storage retry interval", retry_row)
         layout.addLayout(form)
         columns_group = QGroupBox("CSV columns")
         columns_layout = QGridLayout(columns_group)
@@ -69,7 +79,7 @@ class RecordingSettingsDialog(QDialog):
             columns_layout.addWidget(check, index // 2, index % 2)
             self.column_checks[column] = check
         layout.addWidget(columns_group)
-        safety = QLabel("CSV • mV • Sync every reading\nNo automatic deletion or overwriting. A full drive or write error stops acquisition.")
+        safety = QLabel("CSV • mV • Sync every reading\nStorage errors pause new readings and retry the pending sample. No automatic deletion or overwriting.")
         safety.setWordWrap(True)
         layout.addWidget(safety)
         self.remember = QCheckBox("Remember these settings for next launch")
@@ -90,6 +100,7 @@ class RecordingSettingsDialog(QDialog):
         return dict(directory=self.directory.text().strip(), file_prefix=self.prefix.text().strip(),
                     max_data_lines=self.max_lines.value(), rotate_daily=self.daily.isChecked(),
                     min_free_mb=self.min_free.value(),
+                    retry_interval_sec=self.retry_interval.value(),
                     included_columns=[column for column, check in self.column_checks.items() if check.isChecked()])
 
     def accept(self):

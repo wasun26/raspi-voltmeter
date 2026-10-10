@@ -78,16 +78,33 @@ class RecordingUiTests(unittest.TestCase):
         self.assertEqual(len(rows), self.acq.recorder.saved_count)
         self.assertEqual(rows[0]["sequence"], "1")
 
-    def test_write_error_stays_visible_and_cannot_resume(self):
+    def test_write_error_shows_retry_status_while_acquisition_waits(self):
         with patch.object(self.recorder, "write", side_effect=OSError("disk full")):
             self.win.start_btn.click()
-            self.acq._thread.join(timeout=3)
+            deadline = time.monotonic() + 2
+            while not self.acq.recording_retrying and time.monotonic() < deadline:
+                self.app.processEvents()
+                time.sleep(0.01)
+            self.app.processEvents()
+            self.assertTrue(self.acq.recording_retrying)
+            self.assertTrue(self.acq._running)
+            self.assertIn("retrying", self.win.recording_label.text())
+            self.assertEqual(self.win.voltage_label.text(), "STORAGE RETRY")
+            self.assertTrue(self.win.start_btn.isEnabled())
+            self.assertFalse(self.win.change_folder_btn.isEnabled())
+            self.win.start_btn.click()
         self.win._update_ui()
-        self.assertIn("disk full", self.win.recording_label.text())
-        self.assertFalse(self.win.start_btn.isEnabled())
-        self.assertFalse(self.win.change_folder_btn.isEnabled())
+        self.assertFalse(self.acq._running)
+        self.assertIsNotNone(self.acq.pending_recording)
+        self.assertIn("unsaved sample", self.win.recording_label.text())
         self.assertEqual(self.recorder.saved_count, 0)
         self.assertIsNone(self.recorder.last_saved_timestamp)
+        self.win.start_btn.click()
+        self.wait_for_saved(1)
+        self.win.start_btn.click()
+        self.assertIsNone(self.acq.pending_recording)
+        with self.recorder.path.open(newline="") as handle:
+            self.assertEqual(list(csv.DictReader(handle))[0]["sequence"], "1")
 
     def test_cancel_or_invalid_folder_keeps_current_session(self):
         self.win._update_ui()
@@ -151,6 +168,7 @@ class RecordingUiTests(unittest.TestCase):
         dialog.max_lines.setValue(2)
         dialog.prefix.setText("new_test")
         dialog.daily.setChecked(False)
+        dialog.retry_interval.setValue(7)
         dialog.column_checks["unix_timestamp"].setChecked(False)
         dialog.column_checks["adc_source"].setChecked(False)
         preferences = Path(self.temp.name) / "settings.json"
@@ -159,6 +177,7 @@ class RecordingUiTests(unittest.TestCase):
              patch("gui.main_window.save_recording_settings", side_effect=lambda opts: save_recording_settings(opts, preferences)):
             self.win.recording_settings_action.trigger()
         self.assertEqual(load_recording_settings(preferences)["max_data_lines"], 2)
+        self.assertEqual(load_recording_settings(preferences)["retry_interval_sec"], 7)
         self.assertNotIn("unix_timestamp", load_recording_settings(preferences)["included_columns"])
         self.assertEqual(self.acq.recorder.saved_count, 0)
         self.win.start_btn.click()
@@ -322,16 +341,21 @@ class RecordingUiTests(unittest.TestCase):
         self.app.processEvents()
         self.assertTrue(self.win._plot_active)
 
-    def test_collection_mode_reports_storage_failure_without_waiting_for_timer(self):
+    def test_collection_mode_reports_storage_retry_without_waiting_for_timer(self):
         self.win.show()
         self.win.collection_mode_action.trigger()
         with patch.object(self.recorder, "write", side_effect=OSError("disk full")):
             self.win.measurement_action.trigger()
-            self.acq._thread.join(timeout=2)
+            deadline = time.monotonic() + 2
+            while not self.acq.recording_retrying and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.app.processEvents()
+            self.assertIn("disk full", self.win.recording_label.text())
+            self.assertTrue(self.win.measurement_action.isEnabled())
+            self.assertTrue(self.acq._running)
+            self.win.measurement_action.trigger()
         # Process the queued error signal; do not manually refresh or wait 3s.
         self.app.processEvents()
-        self.assertIn("disk full", self.win.recording_label.text())
-        self.assertFalse(self.win.measurement_action.isEnabled())
         self.assertFalse(self.acq._running)
 
     def test_collection_mode_can_be_enabled_on_startup(self):

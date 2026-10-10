@@ -242,7 +242,7 @@ that the `AD0-AD1_mV` column has ten data rows.
 
 Recording defaults in `config.py` limit each CSV to 100,000 data rows and reserve
 100 MiB of free drive space. Full files roll over without stopping; low space
-stops acquisition without deleting existing data. GUI Recording settings can
+pauses new ADC readings and retries without deleting existing data. GUI Recording settings can
 remember overrides in `recording_settings.json`, which also affect terminal
 startup. CLI options such as `--max-data-lines` and `--min-free-mb` override them
 for a run. Check these settings before enabling the unattended service.
@@ -263,8 +263,11 @@ journalctl -u voltmeter.service -f
 
 Do not run the GUI and service against the ADC simultaneously. Stop the service
 with `sudo systemctl stop voltmeter.service` before manual hardware tests.
-The service starts after reboot and retries failed runs every ten seconds; each
-run creates new files. Check storage capacity for the whole deployment.
+The service starts after reboot and retries failed runs every ten seconds. During
+a storage outage, the running process pauses ADC reads, retries its pending sample
+every five seconds by default, and resumes automatically when storage returns.
+Check storage capacity for the whole deployment; an outage leaves a measurement
+gap, and stopping during an outage discards the unsaved pending sample.
 
 Before deployment, test stopping/restarting and abruptly removing power on the
 actual storage setup. Previously synced rows should remain readable; an unfinished

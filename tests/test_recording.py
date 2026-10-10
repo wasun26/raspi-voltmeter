@@ -112,28 +112,101 @@ class RecordingTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.recorder.write(datetime.now().timestamp(), {(0, 1): 0.03})
 
-    def test_acquisition_stops_and_reports_storage_failure(self):
+    def test_acquisition_retries_storage_failure_and_resumes(self):
         delivered = []
-        acq = AcquisitionManager(self.adc, [(0, 1)], sample_rate=100, recorder=self.recorder)
+        recorder = CsvRecorder(self.temp.name, [(0, 1)], self.adc, retry_interval_sec=1)
+        self.addCleanup(recorder.close)
+        acq = AcquisitionManager(self.adc, [(0, 1)], sample_rate=100, recorder=recorder)
         acq.add_callback(lambda ts, data: delivered.append(data))
-        with patch.object(self.recorder, "write", side_effect=OSError("disk full")):
+        actual_write = recorder.write
+        failing = threading.Event()
+        failing.set()
+
+        def transient_write(ts, readings, **kwargs):
+            if failing.is_set():
+                raise OSError("disk full")
+            actual_write(ts, readings, **kwargs)
+
+        with patch.object(recorder, "write", side_effect=transient_write), \
+             patch.object(self.adc, "read_voltage", wraps=self.adc.read_voltage) as read_voltage:
+            acq.start()
+            deadline = time.monotonic() + 2
+            while not acq.recording_retrying and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(acq.recording_retrying)
+            self.assertTrue(acq._running)
+            self.assertEqual(recorder.saved_count, 0)
+            time.sleep(0.1)
+            self.assertEqual(read_voltage.call_count, 1)
+            failing.clear()
+            deadline = time.monotonic() + 3
+            while recorder.saved_count < 1 and time.monotonic() < deadline:
+                time.sleep(0.01)
+            acq.stop()
+        self.assertGreaterEqual(recorder.saved_count, 1)
+        self.assertIsNone(acq.recording_error)
+        self.assertFalse(acq._running)
+        self.assertTrue(any(isinstance(value, Exception) for value in delivered))
+        self.assertTrue(any(isinstance(value, dict) for value in delivered))
+
+    def test_fsync_error_retries_same_sample_in_new_file(self):
+        recorder = CsvRecorder(self.temp.name, [(0, 1)], self.adc, retry_interval_sec=1)
+        self.addCleanup(recorder.close)
+        now = datetime.now().timestamp()
+        recorder.write(now, {(0, 1): 0.01})
+        first_path = recorder.path
+        real_sync = recorder._sync
+        failed = False
+
+        def fail_once():
+            nonlocal failed
+            if not failed:
+                failed = True
+                raise OSError("temporary I/O error")
+            real_sync()
+
+        retry_errors = []
+        with patch.object(recorder, "_sync", side_effect=fail_once):
+            self.assertTrue(recorder.write_with_retry(
+                now + 1, {(0, 1): 0.02}, threading.Event(), retry_errors.append,
+                captured_monotonic=recorder._start + 0.123))
+        self.assertNotEqual(recorder.path, first_path)
+        self.assertEqual(recorder.saved_count, 2)
+        self.assertEqual(self.rows(recorder.path)[0]["sequence"], "2")
+        self.assertEqual(self.rows(recorder.path)[0]["elapsed_s"], "0.123000")
+        self.assertIsInstance(retry_errors[0], OSError)
+        self.assertIsNone(retry_errors[-1])
+
+    def test_low_space_recovers_without_discarding_pending_sample(self):
+        recorder = CsvRecorder(self.temp.name, [(0, 1)], self.adc,
+                               min_free_mb=100, retry_interval_sec=1)
+        self.addCleanup(recorder.close)
+        from collections import namedtuple
+        Usage = namedtuple("Usage", "total used free")
+        checks = [Usage(1_000_000_000, 999_999_999, 1),
+                  Usage(1_000_000_000, 0, 1_000_000_000)]
+        with patch("core.recording.shutil.disk_usage", side_effect=checks):
+            self.assertTrue(recorder.write_with_retry(
+                datetime.now().timestamp(), {(0, 1): 0.01}, threading.Event()))
+        self.assertEqual(recorder.saved_count, 1)
+        self.assertEqual(self.rows(recorder.path)[0]["sequence"], "1")
+
+    def test_non_storage_recording_error_still_stops_acquisition(self):
+        acq = AcquisitionManager(self.adc, [(0, 1)], sample_rate=100, recorder=self.recorder)
+        with patch.object(self.recorder, "write", side_effect=ValueError("bad row")):
             acq.start()
             acq._thread.join(timeout=2)
-            acq.stop()
         self.assertFalse(acq._running)
-        self.assertEqual(len(delivered), 1)
-        self.assertIsInstance(delivered[0], Exception)
-        with self.assertRaises(RuntimeError):
-            acq.start()
+        self.assertIn("bad row", str(acq.recording_error))
 
     def test_stop_waits_for_inflight_recording(self):
         entered, release, stopped = threading.Event(), threading.Event(), threading.Event()
         actual_write = self.recorder.write
 
-        def slow_write(ts, readings):
+        def slow_write(ts, readings, **kwargs):
             entered.set()
             release.wait(3)
-            actual_write(ts, readings)
+            actual_write(ts, readings, **kwargs)
 
         acq = AcquisitionManager(self.adc, [(0, 1)], recorder=self.recorder)
         with patch.object(self.recorder, "write", side_effect=slow_write):
@@ -153,7 +226,8 @@ class RecordingTests(unittest.TestCase):
     def test_terminal_records_five_rows(self):
         result = subprocess.run(
             [sys.executable, "-B", "serial_monitor.py", "--mock", "--rate", "100",
-             "--count", "5", "--quiet", "--log-dir", self.temp.name],
+             "--count", "5", "--quiet", "--retry-seconds", "1",
+             "--log-dir", self.temp.name],
             capture_output=True, text=True, timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -248,7 +322,8 @@ class RecordingTests(unittest.TestCase):
     def test_invalid_options_rejected(self):
         for options in ({"max_data_lines": -1}, {"max_data_lines": 1.5},
                         {"file_prefix": "../escape"}, {"file_prefix": ""},
-                        {"min_free_mb": -1}, {"rotate_daily": "false"}):
+                        {"min_free_mb": -1}, {"rotate_daily": "false"},
+                        {"retry_interval_sec": 0}, {"retry_interval_sec": True}):
             with self.subTest(options=options), self.assertRaises(ValueError):
                 CsvRecorder(self.temp.name, [(0, 1)], self.adc, **options)
 

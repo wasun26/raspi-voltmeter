@@ -38,7 +38,7 @@ class CsvRecorder:
 
     def __init__(self, directory, channels, adc, averaging=1, max_data_lines=100000,
                  file_prefix="voltmeter", rotate_daily=True, min_free_mb=100,
-                 included_columns=None):
+                 included_columns=None, retry_interval_sec=5):
         if isinstance(max_data_lines, bool) or not isinstance(max_data_lines, int) or max_data_lines < 0:
             raise ValueError("Max data lines must be a nonnegative integer")
         if not isinstance(file_prefix, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", file_prefix):
@@ -47,10 +47,14 @@ class CsvRecorder:
             raise ValueError("Daily rotation must be true or false")
         if isinstance(min_free_mb, bool) or not isinstance(min_free_mb, int) or min_free_mb < 0:
             raise ValueError("Minimum free MB must be a nonnegative integer")
+        if (isinstance(retry_interval_sec, bool) or not isinstance(retry_interval_sec, int)
+                or not 1 <= retry_interval_sec <= 3600):
+            raise ValueError("Retry interval must be 1-3600 seconds")
         self.max_data_lines = max_data_lines
         self.file_prefix = file_prefix
         self.rotate_daily = rotate_daily
         self.min_free_mb = min_free_mb
+        self.retry_interval_sec = retry_interval_sec
         self.directory = Path(directory).expanduser().resolve()
         missing = []
         current = self.directory
@@ -126,7 +130,45 @@ class CsvRecorder:
     def options(self):
         return dict(max_data_lines=self.max_data_lines, file_prefix=self.file_prefix,
                     rotate_daily=self.rotate_daily, min_free_mb=self.min_free_mb,
-                    included_columns=list(self.included_columns))
+                    included_columns=list(self.included_columns),
+                    retry_interval_sec=self.retry_interval_sec)
+
+    def recover(self):
+        """Abandon a file with an unconfirmed row; retry in a new file.
+
+        An fsync error leaves that last row's durability unknown. The old file
+        is preserved, and the caller retries the same sample with its sequence.
+        """
+        if self.error is None:
+            return
+        if not isinstance(self.error, OSError):
+            raise RuntimeError(f"Recording cannot be recovered automatically: {self.error}")
+        self.close()
+        self.error = None
+        self._day = None
+        self._next_space_check = 0.0
+
+    def write_with_retry(self, timestamp, readings, stop_event, on_retry=None,
+                         captured_monotonic=None):
+        """Retry one pending sample without acquiring or buffering later samples."""
+        retrying = False
+        if captured_monotonic is None:
+            captured_monotonic = time.monotonic()
+        while not stop_event.is_set():
+            try:
+                self.recover()
+                self.write(timestamp, readings, captured_monotonic=captured_monotonic)
+            except OSError as exc:
+                retrying = True
+                if on_retry is not None:
+                    on_retry(exc)
+                if stop_event.wait(self.retry_interval_sec):
+                    break
+            else:
+                if retrying and on_retry is not None:
+                    on_retry(None)
+                return True
+        return False
 
     def _check_space(self):
         now = time.monotonic()
@@ -137,7 +179,7 @@ class CsvRecorder:
                               f"minimum is {self.min_free_mb} MiB. Existing files are kept.")
             self._next_space_check = now + 5.0
 
-    def write(self, timestamp, readings):
+    def write(self, timestamp, readings, captured_monotonic=None):
         if self.error is not None:
             raise RuntimeError(f"Recording previously failed: {self.error}")
         try:
@@ -147,10 +189,11 @@ class CsvRecorder:
             if (self._file is None or (self.rotate_daily and self._day != day)
                     or (self.max_data_lines and self.file_saved_count >= self.max_data_lines)):
                 self._open(when)
+            sample_clock = captured_monotonic if captured_monotonic is not None else time.monotonic()
             values = {
                 "timestamp": when.isoformat(timespec="microseconds"),
                 "unix_timestamp": f"{timestamp:.6f}",
-                "elapsed_s": f"{time.monotonic() - self._start:.6f}",
+                "elapsed_s": f"{sample_clock - self._start:.6f}",
                 "sequence": self.saved_count + 1,
                 "adc_source": type(self.adc).__name__,
                 "input_mode": "single-ended" if getattr(self.adc, "single_ended", True) else "differential",

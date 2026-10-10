@@ -150,7 +150,9 @@ def main():
     parser.add_argument("--file-prefix", default=recording_settings["file_prefix"],
                         help="CSV filename prefix")
     parser.add_argument("--min-free-mb", type=int, default=recording_settings["min_free_mb"],
-                        help="Stop below this free space in MiB (0=no reserve)")
+                        help="Pause and retry below this free space in MiB (0=no reserve)")
+    parser.add_argument("--retry-seconds", type=int, default=recording_settings["retry_interval_sec"],
+                        help="Seconds between storage retries (1-3600)")
     parser.add_argument("--daily-rotation", type=parse_bool, default=recording_settings["rotate_daily"],
                         help="Start a new file daily: true/false")
     parser.add_argument("--no-log", action="store_true",
@@ -233,7 +235,9 @@ def main():
             recording_failed = True
             recorder = CsvRecorder(args.log_dir, channels, adc, args.averaging,
                                    max_data_lines=args.max_data_lines, file_prefix=args.file_prefix,
-                                   rotate_daily=args.daily_rotation, min_free_mb=args.min_free_mb)
+                                   rotate_daily=args.daily_rotation, min_free_mb=args.min_free_mb,
+                                   included_columns=recording_settings["included_columns"],
+                                   retry_interval_sec=args.retry_seconds)
             recording_failed = False
             print(f"CSV directory: {recorder.directory} (flush + fsync every sample)")
         while not stop_requested.is_set():
@@ -252,7 +256,24 @@ def main():
 
             if recorder is not None:
                 recording_failed = True
-                recorder.write(ts, dict(readings))
+                retry_active = False
+
+                def retry_status(exc):
+                    nonlocal retry_active
+                    if exc is None:
+                        print("Storage recovered; recording resumed.", file=sys.stderr)
+                        retry_active = False
+                    elif not retry_active:
+                        print(f"Storage unavailable; retrying every {recorder.retry_interval_sec} s: {exc}",
+                              file=sys.stderr)
+                        retry_active = True
+
+                if not recorder.write_with_retry(
+                        ts, dict(readings), stop_requested, retry_status,
+                        captured_monotonic=started):
+                    print("Stopped during storage retry; pending sample was not saved.", file=sys.stderr)
+                    recording_failed = False
+                    break
                 recording_failed = False
                 if count == 0:
                     print(f"CSV file: {recorder.path}")

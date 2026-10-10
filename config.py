@@ -41,6 +41,7 @@ DEFAULT = {
         "rotate_daily": True,
         "min_free_mb": 100,  # Stop when drive free space drops below this.
         "included_columns": None,  # All columns by default; timestamp and one mV channel are required.
+        "retry_interval_sec": 5,  # Retry one pending sample; no unbounded queue.
     },
 }
 

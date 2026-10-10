@@ -443,9 +443,11 @@ class MainWindow(QMainWindow):
             "To change destination, pause first, then choose File > Change recording folder. "
             "A new session starts and existing files are kept. "
             "File > Recording settings sets the maximum data rows per file (header excluded), "
-            "daily rotation, filename prefix and minimum free drive space. "
+            "daily rotation, filename prefix, CSV columns, minimum free drive space "
+            "and storage retry interval. "
             "Remember settings saves these preferences for the next launch. "
-            "Reaching a row limit continues in a new file; low disk space stops acquisition.\n\n"
+            "Reaching a row limit continues in a new file; low disk space pauses new readings "
+            "until the pending sample can be saved.\n\n"
             "File > Open recording folder (Ctrl+O) opens the saved files. "
             "Clear graph (Ctrl+R) clears display history only.\n\n"
             "Data collection mode (Ctrl+M) stops graph work and updates status every few seconds. "
@@ -455,7 +457,8 @@ class MainWindow(QMainWindow):
             "View reopens closed panels; Reset panel layout restores the original arrangement. "
             "Closing a panel does not stop measurement or recording.\n\n"
             "MockAdc / SIMULATED DATA means the readings are simulated. "
-            "A recording error stops acquisition; fix storage and restart the app.")
+            "Storage errors pause acquisition and retry the pending sample automatically. "
+            "The Save data panel shows retry status.")
 
     def _show_about(self):
         QMessageBox.about(self, "About Voltmeter",
@@ -472,8 +475,11 @@ class MainWindow(QMainWindow):
             if notify and not self._closing:
                 self._error_received.emit()
         else:
+            recovered = self._last_error is not None and self.acq.recording_error is None
             self._last = readings
             self._last_error = None
+            if recovered and not self._closing:
+                self._error_received.emit()
             with self._data_lock:
                 if not self._plot_active:
                     return
@@ -497,9 +503,12 @@ class MainWindow(QMainWindow):
         mode = "Data collection: graph off" if self._collection_mode else "Live view" if self._plot_active else "Graph inactive"
         self.mode_label.setText(f"{mode} | {source} | Status refresh: {self.timer.interval() / 1000:g} s")
         if self._last_error is not None:
-            self.voltage_label.setText("ERROR")
+            retrying = self.acq.recording_retrying
+            self.voltage_label.setText("STORAGE RETRY" if retrying else "ERROR")
             self.voltage_label.setStyleSheet(
-                "color: white; background-color: #C62828; padding: 20px; border-radius: 10px; font-weight: bold;")
+                "color: white; background-color: "
+                + ("#9A6700" if retrying else "#C62828")
+                + "; padding: 20px; border-radius: 10px; font-weight: bold;")
             self.status_label.setText(f"{self._last_error} (Errors: {self._error_count})")
             self.status_label.setWordWrap(True)
             self.status_label.setStyleSheet("color: #C62828; padding: 4px; font-weight: bold;")
@@ -535,7 +544,8 @@ class MainWindow(QMainWindow):
 
     def _update_recording_ui(self):
         recorder = self.acq.recorder
-        failed = self.acq.recording_error is not None
+        retrying = self.acq.recording_retrying
+        failed = self.acq.recording_error is not None and not retrying
         running = self.acq._running
         self.start_btn.setEnabled(not failed)
         self.start_btn.setText("Stopped" if failed else "Pause measurement" if running else "Start measurement")
@@ -550,13 +560,17 @@ class MainWindow(QMainWindow):
         self.measurement_action.setEnabled(not failed)
         self.collection_mode_action.setEnabled(recorder is not None)
         self.measurement_action.setText("&Pause measurement" if running else "&Start measurement")
-        if failed:
+        if failed or retrying:
             self.recording_dock.show()
             self.recording_dock.raise_()
         if failed:
             state, color = str(self.acq.recording_error), "#C62828"
+        elif retrying:
+            state, color = str(self.acq.recording_error) + " | Reading paused until this sample is saved", "#9A6700"
         elif recorder is None:
             state, color = "Saving disabled - measurements are not recorded", "#9A6700"
+        elif self.acq.pending_recording is not None:
+            state, color = "Paused with one unsaved sample - start measurement to retry", "#9A6700"
         elif not running:
             state, color = "Paused - saved files are kept", "#9A6700"
         elif self._last_error is not None:
@@ -657,10 +671,12 @@ class MainWindow(QMainWindow):
         return True
 
     def _toggle(self):
-        if self.acq.recording_error is not None:
+        if self.acq.recording_error is not None and not self.acq.recording_retrying:
             return
         if self.acq._running:
             self.acq.stop()
+            if self._last_error is not None and self.acq.recording_error is None:
+                self._last_error = None
         else:
             self.acq.start()
         self._update_ui()
