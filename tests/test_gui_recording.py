@@ -10,7 +10,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QLocale, Qt
+from PyQt6.QtCore import QEvent, QLocale, Qt
 from core.acquisition import AcquisitionManager
 from core.recording import CsvRecorder
 from gui.main_window import MainWindow
@@ -27,13 +27,21 @@ class RecordingUiTests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        gain_save = patch("gui.main_window.save_gain_settings")
+        gain_save.start()
+        self.addCleanup(gain_save.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.adc = MockAdc(single_ended=False, gain=64)
         self.recorder = CsvRecorder(self.temp.name, [(0, 1)], self.adc)
         self.acq = AcquisitionManager(self.adc, [(0, 1)], sample_rate=30, recorder=self.recorder)
         self.win = MainWindow(self.acq)
         self.addCleanup(self.temp.cleanup)
-        self.addCleanup(self.win.close)
+        self.addCleanup(self.dispose_window)
+
+    def dispose_window(self):
+        self.win.close()
+        self.win.deleteLater()
+        self.app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
     def wait_for_saved(self, minimum=1):
         deadline = time.monotonic() + 3
@@ -42,6 +50,18 @@ class RecordingUiTests(unittest.TestCase):
             time.sleep(0.01)
         self.assertGreaterEqual(self.acq.recorder.saved_count, minimum)
         self.win._update_ui()
+
+    def test_auto_gain_switch_is_queued_and_visible_in_collection_mode(self):
+        self.win.gain_combo.setCurrentIndex(0)
+        self.assertEqual(self.adc.gain, 64)  # UI never accesses hardware directly.
+        self.win.start_btn.click()
+        self.wait_for_saved(2)
+        self.assertTrue(self.acq.auto_gain.enabled)
+        self.assertEqual(self.adc.gain, 1)
+        self.assertIn("Auto x1", self.win.range_label.text())
+        self.win._set_collection_mode(True)
+        self.assertIn("Auto gain x1", self.win.mode_label.text())
+        self.assertFalse(self.win.gain_combo.isEnabled())
 
     def test_update_closes_file_and_can_resume_after_failed_install(self):
         self.win.start_btn.click()

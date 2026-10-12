@@ -28,7 +28,7 @@ from PyQt6.QtWidgets import (
 
 from gui.chart import create_plot_widget, make_pen
 from core.recording import CsvRecorder
-from config import save_recording_settings
+from config import save_recording_settings, save_gain_settings
 from gui.recording_settings import RecordingSettingsDialog
 from app_version import APP_VERSION
 
@@ -174,6 +174,8 @@ class MainWindow(QMainWindow):
         control_layout.addWidget(gain_label)
 
         self.gain_combo = QComboBox()
+        self.gain_combo.addItem("Auto", None)
+        self.gain_combo.setToolTip("Auto starts at x1. Near full scale: reduce gain; quiet signal: increase slowly. Clipped peaks cannot be recovered.")
         gain_options = self._get_gain_options()
         for g in gain_options:
             self.gain_combo.addItem(f"x{g}", g)
@@ -181,6 +183,7 @@ class MainWindow(QMainWindow):
         control_layout.addWidget(self.gain_combo)
 
         self.range_label = QLabel("Range: --")
+        self.range_label.setWordWrap(True)
         control_layout.addWidget(self.range_label)
         self._set_current_gain()
         control_layout.addStretch()
@@ -507,12 +510,18 @@ class MainWindow(QMainWindow):
     def _update_ui(self):
         if self._closing:
             return
+        self._update_range_label()
         self._update_recording_ui()
         source = type(self.acq.adc).__name__
         if source == "MockAdc":
             source += " / SIMULATED DATA"
         mode = "Data collection: graph off" if self._collection_mode else "Live view" if self._plot_active else "Graph inactive"
-        self.mode_label.setText(f"{mode} | {source} | Status refresh: {self.timer.interval() / 1000:g} s")
+        capture = self.acq.last_scan_metadata
+        gain_state = f"{capture.get('gain_mode', 'manual').title()} gain x{capture.get('gain', self.acq.adc.gain)}"
+        clipped = " | CLIPPED / check input" if capture.get("clipped") else ""
+        if self.acq.clipped_scan_count:
+            clipped += f" | Clipped scans: {self.acq.clipped_scan_count:,}"
+        self.mode_label.setText(f"{mode} | {source} | {gain_state}{clipped} | Status refresh: {self.timer.interval() / 1000:g} s")
         if self._last_error is not None:
             retrying = self.acq.recording_retrying
             self.voltage_label.setText("STORAGE RETRY" if retrying else "ERROR")
@@ -701,15 +710,13 @@ class MainWindow(QMainWindow):
 
     def _change_gain(self):
         gain = self.gain_combo.currentData()
-        if gain is None:
+        try:
+            save_gain_settings(gain)
+        except Exception as exc:
+            QMessageBox.warning(self, "Gain settings", f"Could not save gain selection: {exc}")
+            self._set_current_gain()
             return
-        adc = getattr(self.acq, "adc", None)
-        if adc and hasattr(adc, "set_gain"):
-            try:
-                adc.set_gain(int(gain))
-            except Exception:
-                pass
-        self._update_range_label()
+        self.acq.auto_gain.request_mode(gain)
 
     def _get_gain_options(self):
         adc = getattr(self.acq, "adc", None)
@@ -720,16 +727,23 @@ class MainWindow(QMainWindow):
     def _set_current_gain(self):
         adc = getattr(self.acq, "adc", None)
         current = getattr(adc, "gain", 1)
+        self.gain_combo.blockSignals(True)
+        if self.acq.auto_gain.enabled:
+            self.gain_combo.setCurrentIndex(0)
+            self.gain_combo.blockSignals(False)
+            self._update_range_label()
+            return
         for i in range(self.gain_combo.count()):
             if self.gain_combo.itemData(i) == current:
                 self.gain_combo.setCurrentIndex(i)
                 break
+        self.gain_combo.blockSignals(False)
         self._update_range_label()
 
     def _update_range_label(self):
         adc = getattr(self.acq, "adc", None)
         vref = float(getattr(adc, "vref", 2.5))
-        gain = float(getattr(adc, "gain", 1))
+        gain = float(self.acq.last_scan_metadata.get("gain", getattr(adc, "gain", 1)))
         single_ended = bool(getattr(adc, "single_ended", True))
         full_scale = vref / max(gain, 1.0)
         if not single_ended:
@@ -740,7 +754,10 @@ class MainWindow(QMainWindow):
             text = f"Range: 0-{fs_scaled:.{decimals}f} {unit}"
         else:
             text = f"Range: -{fs_scaled:.{decimals}f} to {fs_scaled:.{decimals}f} {unit}"
-        self.range_label.setText(text)
+        capture = self.acq.last_scan_metadata
+        state = "Auto" if self.acq.auto_gain.enabled else "Manual"
+        warning = " | CLIPPED / input floating or over range" if capture.get("clipped") else ""
+        self.range_label.setText(f"{state} x{gain:g} | {text}{warning}")
 
     def _select_unit(self, full_scale_v: float):
         # Pick unit based on range from gain selection.
@@ -829,6 +846,7 @@ class MainWindow(QMainWindow):
         self._refresh_plot_state()
         self.timer.stop()
         self.acq.stop()
+        self.acq.remove_callback(self._on_data)
         if self.acq.recorder is not None:
             self.acq.recorder.close()
         event.accept()

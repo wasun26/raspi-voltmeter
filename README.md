@@ -77,6 +77,41 @@ On non-Raspberry Pi machines, `main.py` and `serial_monitor.py` use `MockAdc` wh
 On Windows, double-click `run_voltmeter.bat` to open the GUI using the project's
 virtual environment, or run `.\.venv\Scripts\python.exe -B main.py` in PowerShell.
 
+## Auto gain
+
+Select **Auto** in the Gain control before entering data collection mode. Manual
+gain remains the default (x64). Auto starts at x1 and uses one shared gain across
+the sequential channel scan. It reduces one step when any conversion reaches
+80% of full scale; a clipped conversion requests the configured minimum gain.
+It increases one step only after every channel stays below 20% for 10 seconds,
+with a 3-second increase cooldown. Pauses/storage retries reset quiet-time credit.
+These thresholds and x1-x64 limits are configurable in `config.py` under
+`auto_gain`; set `enabled=True` there to start unattended sessions in Auto.
+GUI selections are remembered in `gain_settings.json` and restored after restart,
+including an app update; saved choices take precedence over the config default.
+The terminal uses its explicit flags/config rather than the GUI preference file.
+
+Gain changes are applied by the acquisition thread between scans. ADS1256 waits
+for DRDY after automatic calibration and verifies the PGA register before reading
+another channel. This introduces measurement gaps; auto gain cannot recover an
+already clipped peak, measure a disconnected floating input meaningfully, or
+protect analog inputs from an unknown sensor voltage. Validate input protection,
+bias/common-mode limits, source impedance and conditioning before specimen tests.
+Nominal differential full scale at VREF 2.5 V is +/-5 V at x1 and +/-78.125 mV at
+x64; each pin's limits relative to AGND must also be satisfied.
+
+CSV capture metadata records actual gain, mode, change reason/duration, ADC data
+rate, peak fraction and clipping. Per-channel fields record conversion timestamps
+and raw counts, including JSON arrays containing every conversion when averaging.
+`raw_count` is the last conversion; `raw_min`/`raw_max` span the averaging group.
+Auto enforces these metadata columns even when earlier preferences hid them;
+schema changes start a new file. Mock raw counts are simulated. UI reports current
+gain and cumulative clipped scans even when the graph is disabled.
+
+Terminal use: `python serial_monitor.py --mock --auto-gain --rate 5 --channels 0-1,2-3,4-5 --count 5`.
+Auto gain is implemented and mock-tested; settling, calibration gaps and signal
+accuracy on Raspberry Pi/ADS1256 remain to be hardware-validated.
+
 ## Update from the app
 
 The current software version is shown in the window title and **Help → About**.

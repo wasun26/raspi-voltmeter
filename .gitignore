@@ -27,6 +27,7 @@ Thumbs.db
 
 logs/
 recording_settings.json
+gain_settings.json
 *.log
 *.bak
 *.tmp

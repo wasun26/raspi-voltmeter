@@ -66,6 +66,7 @@ class MockAdc(AdcDevice):
 
     def set_gain(self, gain: int):
         self.gain = int(gain)
+        self._last_sample_time = 0.0
 
     def _quantize(self, value: float) -> float:
         full_scale = self.vref / max(self.gain, 1)
@@ -79,6 +80,7 @@ class MockAdc(AdcDevice):
         # 24-bit signed range for ADS1256
         full_scale_counts = 0x7FFFFF
         counts = int(round((value / full_scale) * full_scale_counts))
+        self.last_raw = counts
         return (counts / full_scale_counts) * full_scale
 
     def _generate_sample(self) -> float:
@@ -216,8 +218,18 @@ class ADS1256(AdcDevice):
         self._configure()
 
     def set_gain(self, gain: int):
-        self.gain = self._validate_gain(gain)
-        self._configure()
+        gain = self._validate_gain(gain)
+        if gain == self.gain:
+            return
+        self._wait_drdy(timeout=5.0)
+        # Change only PGA bits; keep MUX, rate and other ADCON settings.
+        adcon = self._read_reg(self.REG_ADCON)
+        self._write_reg(self.REG_ADCON, (adcon & ~0x07) | self.GAIN_MAP[gain])
+        # ACAL is enabled: wait for calibration and valid data before touching MUX.
+        self._wait_drdy(timeout=5.0)
+        if self._read_reg(self.REG_ADCON) & 0x07 != self.GAIN_MAP[gain]:
+            raise IOError("ADS1256 gain register verification failed")
+        self.gain = gain
 
     def _validate_gain(self, gain: int) -> int:
         gain = int(gain)
@@ -307,6 +319,7 @@ class ADS1256(AdcDevice):
                 rate_code,
             ],
         )
+        self._wait_drdy(timeout=5.0)
 
     def _set_channel(self, channel):
         if isinstance(channel, (tuple, list)) and len(channel) == 2:
@@ -342,6 +355,7 @@ class ADS1256(AdcDevice):
     def read_voltage(self, channel: int = 0) -> float:
         self._set_channel(channel)
         raw = self._read_raw()
+        self.last_raw = raw
         full_scale = 0x7FFFFF
         if self.single_ended:
             return (raw / full_scale) * (self.vref / self.gain)

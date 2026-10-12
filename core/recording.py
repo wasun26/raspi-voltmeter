@@ -16,7 +16,14 @@ def channel_name(channel):
 
 METADATA_COLUMNS = (
     "timestamp", "unix_timestamp", "elapsed_s", "sequence", "adc_source",
-    "input_mode", "gain", "vref_V", "averaging",
+    "input_mode", "gain", "vref_V", "averaging", "gain_mode", "gain_event",
+    "gain_change_s", "adc_data_rate_SPS", "clipped", "peak_fraction",
+)
+
+CHANNEL_CAPTURE_FIELDS = (
+    "conversion_start_unix_s", "conversion_end_unix_s", "raw_count",
+    "raw_min", "raw_max", "peak_fraction", "clipped",
+    "raw_counts", "conversion_unix_s",
 )
 
 
@@ -68,7 +75,9 @@ class CsvRecorder:
             raise NotADirectoryError(str(self.directory))
         self.channels = tuple(channels)
         channel_columns = tuple(f"{channel_name(ch)}_mV" for ch in self.channels)
-        available = METADATA_COLUMNS + channel_columns
+        capture_columns = tuple(f"{channel_name(ch)}_{field}" for ch in self.channels
+                                for field in CHANNEL_CAPTURE_FIELDS)
+        available = METADATA_COLUMNS + channel_columns + capture_columns
         if len(set(available)) != len(available):
             raise ValueError("CSV column names must be unique")
         if included_columns is None:
@@ -183,6 +192,17 @@ class CsvRecorder:
         if self.error is not None:
             raise RuntimeError(f"Recording previously failed: {self.error}")
         try:
+            metadata = getattr(readings, "metadata", {})
+            if metadata.get("gain_mode") == "auto":
+                # Keep gain and capture flags even if an old preference hid them.
+                required = set(METADATA_COLUMNS[6:])
+                required.update(f"{channel_name(ch)}_{field}" for ch in self.channels
+                                for field in CHANNEL_CAPTURE_FIELDS)
+                columns = tuple(c for c in self.available_columns
+                                if c in self.included_columns or c in required)
+                if columns != self.included_columns:
+                    self.close()  # New schema always starts a new CSV file.
+                    self.included_columns = columns
             self._check_space()
             when = datetime.fromtimestamp(timestamp).astimezone()
             day = when.strftime("%Y%m%d")
@@ -201,9 +221,13 @@ class CsvRecorder:
                 "vref_V": getattr(self.adc, "vref", ""),
                 "averaging": self.averaging,
             }
+            values.update({key: value for key, value in metadata.items() if key != "channels"})
+            for channel, captured in metadata.get("channels", {}).items():
+                values.update((f"{channel_name(channel)}_{key}", value)
+                              for key, value in captured.items())
             values.update((f"{channel_name(ch)}_mV", format(readings[ch] * 1000.0, ".12g"))
                           for ch in self.channels if f"{channel_name(ch)}_mV" in self.included_columns)
-            self._writer.writerow([values[column] for column in self.included_columns])
+            self._writer.writerow([values.get(column, "") for column in self.included_columns])
             self._sync()
             self.saved_count += 1
             self.file_saved_count += 1
