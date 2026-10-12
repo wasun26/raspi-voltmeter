@@ -1,0 +1,17 @@
+[Unit]
+Description=ADS1256 durable CSV recorder
+After=local-fs.target
+# If logging to a mounted drive, set RequiresMountsFor=/mnt/measurement
+
+[Service]
+Type=simple
+# Replace User and all /home/pi paths for your installation.
+User=pi
+WorkingDirectory=/home/pi/raspi-voltmeter
+ExecStart=/home/pi/raspi-voltmeter/.venv/bin/python -u serial_monitor.py --adc ads1256 --channels 0-1 --rate 30 --quiet --log-dir /home/pi/raspi-voltmeter/logs
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

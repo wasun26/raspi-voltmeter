@@ -1,9 +1,11 @@
 import sys
+from PyQt6.QtCore import QLocale
 from PyQt6.QtWidgets import QApplication
 
-from config import DEFAULT
+from config import DEFAULT, load_recording_settings
 from hardware.adc import MockAdc
 from core.acquisition import AcquisitionManager
+from core.recording import CsvRecorder
 from gui.main_window import MainWindow
 
 try:
@@ -52,13 +54,21 @@ def create_adc(adc_cfg):
 
 
 def main():
+    QLocale.setDefault(QLocale.c())
+    recording_settings = load_recording_settings()
     adc = create_adc(DEFAULT.get("adc", {}))
     print(f"[main] ADC in use: {adc.__class__.__name__}")
+    recorder = CsvRecorder(
+        recording_settings.pop("directory"), DEFAULT.get("channels", [0]), adc,
+        DEFAULT.get("averaging", 1),
+        **recording_settings,
+    ) if DEFAULT.get("log_enabled", True) else None
     acq = AcquisitionManager(
         adc_device=adc,
         channels=DEFAULT.get("channels", [0]),
         sample_rate=DEFAULT.get("sample_rate", 20),
         averaging=DEFAULT.get("averaging", 1),
+        recorder=recorder,
     )
 
     print("[main] Before QApplication()")
@@ -68,13 +78,21 @@ def main():
         acquisition_manager=acq,
         plot_window_sec=DEFAULT.get("plot_window_sec", 60),
         plot_max_points=DEFAULT.get("plot_max_points", 2000),
-        log_enabled=DEFAULT.get("log_enabled", True),
-        log_dir=DEFAULT.get("log_dir", "logs"),
+        collection_mode=DEFAULT.get("collection_mode_on_start", False),
+        collection_ui_refresh_ms=DEFAULT.get("collection_ui_refresh_ms", 3000),
     )
     win.show()
 
     acq.start()
-    sys.exit(app.exec())
+    try:
+        result = app.exec()
+    finally:
+        acq.stop()
+        if acq.recorder is not None:
+            acq.recorder.close()
+        if hasattr(adc, "close"):
+            adc.close()
+    sys.exit(result)
 
 
 if __name__ == "__main__":

@@ -129,6 +129,18 @@ Exit: repeatable end-to-end results and documented limitations for the project r
 
 ## Out of Scope Until Characterized
 
+Durable CSV recording now runs in the acquisition path and terminal monitor:
+flush/fsync per reading, daily/session file separation, explicit ADC source and
+mV units, stop on recording failure, and graceful shutdown before file closure.
+`voltmeter.service.example` provides opt-in unattended startup on Raspberry Pi OS.
+Mock tests cover rotation, session preservation, sync failures, and shutdown.
+Real hardware, month-long operation, and abrupt power-loss testing remain site
+validation tasks.
+
+- Validate with real ADS1256 hardware.
+- Add calibration support.
+- Add lightweight tests for mock ADC and config-driven ADC creation.
+- Update setup scripts if they still reference removed test/demo paths.
 - Claiming true simultaneous sampling from one ADS1256.
 - Converting voltage to engineering quantities without calibration data.
 - Direct impact/fracture connection without protection review.
