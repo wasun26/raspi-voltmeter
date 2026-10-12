@@ -17,6 +17,8 @@ from gui.main_window import MainWindow
 from hardware.adc import MockAdc
 from gui.recording_settings import RecordingSettingsDialog
 from config import load_recording_settings, save_recording_settings
+from app_update import UpdateInfo
+from gui.update_dialog import UpdateDialog
 
 
 class RecordingUiTests(unittest.TestCase):
@@ -40,6 +42,43 @@ class RecordingUiTests(unittest.TestCase):
             time.sleep(0.01)
         self.assertGreaterEqual(self.acq.recorder.saved_count, minimum)
         self.win._update_ui()
+
+    def test_update_closes_file_and_can_resume_after_failed_install(self):
+        self.win.start_btn.click()
+        self.wait_for_saved(2)
+        old_file = self.recorder.path
+        self.assertTrue(self.win.prepare_for_update())
+        self.assertFalse(self.acq._running)
+        original = old_file.read_bytes()
+        self.win.resume_after_failed_update()
+        self.wait_for_saved(1)
+        self.win.start_btn.click()
+        self.assertEqual(old_file.read_bytes(), original)
+        self.assertNotEqual(self.acq.recorder.path, old_file)
+
+    def test_update_waits_for_pending_storage_sample(self):
+        self.acq.pending_recording = (1.0, {(0, 1): 0.01}, 1.0)
+        self.assertFalse(self.win.prepare_for_update())
+        self.assertIn("waiting for storage", self.win.update_error_detail)
+
+    def test_update_button_checks_then_restarts_after_install(self):
+        self.win.show()
+        info = UpdateInfo("a" * 40, "b" * 40, True, False)
+        with patch("gui.update_dialog.check_for_update", return_value=info), \
+             patch("gui.update_dialog.install_update") as install:
+            dialog = UpdateDialog(self.win)
+            deadline = time.monotonic() + 2
+            while not dialog.update_button.isEnabled() and time.monotonic() < deadline:
+                self.app.processEvents()
+                time.sleep(0.01)
+            self.assertTrue(dialog.update_button.isEnabled())
+            dialog.update_button.click()
+            deadline = time.monotonic() + 2
+            while not self.win.update_requested and time.monotonic() < deadline:
+                self.app.processEvents()
+                time.sleep(0.01)
+        self.assertTrue(self.win.update_requested)
+        install.assert_called_once()
 
     def test_pause_resume_copy_and_folder_change_preserve_data(self):
         self.win._update_ui()

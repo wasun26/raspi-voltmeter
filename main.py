@@ -1,4 +1,6 @@
 import sys
+import os
+from pathlib import Path
 from PyQt6.QtCore import QLocale
 from PyQt6.QtWidgets import QApplication
 
@@ -92,6 +94,8 @@ def main():
             acq.recorder.close()
         if hasattr(adc, "close"):
             adc.close()
+    if win.update_requested:
+        os.execv(sys.executable, [sys.executable, str(Path(__file__).resolve())])
     sys.exit(result)
 
 

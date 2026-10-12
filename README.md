@@ -77,6 +77,26 @@ On non-Raspberry Pi machines, `main.py` and `serial_monitor.py` use `MockAdc` wh
 On Windows, double-click `run_voltmeter.bat` to open the GUI using the project's
 virtual environment, or run `.\.venv\Scripts\python.exe -B main.py` in PowerShell.
 
+## Update from the app
+
+An installed Git checkout on the `main` branch can update itself after the
+maintainer pushes new code to `origin/main`. Click **Check for updates** in the
+toolbar or Help menu. Checking does not interrupt measurement. If a version is
+available, click **Update and restart**. The app stops acquisition, closes the
+current CSV, updates code with a fast-forward merge, installs changed Python
+requirements if needed, and reopens. Recording resumes in a new CSV session, so
+there is a measurement gap during the update.
+
+The update preserves `logs/`, `recording_settings.json`, and other untracked
+data. It refuses to overwrite locally edited tracked code (including
+`config.py`) or to merge diverged Git history; ask the maintainer to handle
+those cases. Use a Git clone rather than a downloaded ZIP, and keep the Pi
+connected to the internet for update checks. If an update fails before code is
+changed, the app resumes the prior recording setup in a new CSV file.
+
+This update path has been tested with mock data and a local Git remote. It has
+not yet been validated on Raspberry Pi hardware.
+
 ## Useful Commands
 
 Run terminal monitor with mock ADC:

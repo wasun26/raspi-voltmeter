@@ -72,6 +72,10 @@ class MainWindow(QMainWindow):
         self._plot_revision = 0
         self._last_plot_revision = -1
         self._closing = False
+        self.update_requested = False
+        self.update_error_detail = ""
+        self._was_running_before_update = False
+        self._recorder_before_update = None
 
         self._setup_ui()
         self._setup_menus()
@@ -327,6 +331,10 @@ class MainWindow(QMainWindow):
         mode_toolbar.addAction(self.collection_mode_action)
         mode_toolbar.addSeparator()
         mode_toolbar.addAction(self.measurement_action)
+        mode_toolbar.addSeparator()
+        self.update_action = QAction("Check for updates", self)
+        self.update_action.triggered.connect(self._show_update_dialog)
+        mode_toolbar.addAction(self.update_action)
         self.addToolBar(mode_toolbar)
         self.mode_label = QLabel()
         self.statusBar().addWidget(self.mode_label, 1)
@@ -351,6 +359,8 @@ class MainWindow(QMainWindow):
         self.addAction(self.exit_full_screen_action)
 
         help_menu = menu_bar.addMenu("&Help")
+        help_menu.addAction(self.update_action)
+        help_menu.addSeparator()
         action(help_menu, "Recording &guide", self._show_recording_guide, "F1")
         help_menu.addSeparator()
         action(help_menu, "&About Voltmeter", self._show_about)
@@ -772,6 +782,46 @@ class MainWindow(QMainWindow):
             return x_vals, y_vals
         step = max(1, int(len(x_vals) / self.plot_max_points))
         return x_vals[::step], y_vals[::step]
+
+    def _show_update_dialog(self):
+        from gui.update_dialog import UpdateDialog
+        UpdateDialog(self).exec()
+
+    def prepare_for_update(self):
+        if self.acq.recording_retrying or self.acq.pending_recording is not None:
+            self.update_error_detail = "A sample is waiting for storage. Let it save before updating."
+            return False
+        self._was_running_before_update = self.acq._running
+        self.acq.stop()
+        worker = getattr(self.acq, "_thread", None)
+        if worker is not None and worker.is_alive():
+            self.update_error_detail = "The measurement worker is still running."
+            return False
+        self._recorder_before_update = self.acq.recorder
+        try:
+            if self._recorder_before_update is not None:
+                self._recorder_before_update.close()
+        except OSError as exc:
+            self.update_error_detail = f"Could not safely close the CSV file: {exc}"
+            return False
+        self._update_ui()
+        return True
+
+    def resume_after_failed_update(self):
+        old = self._recorder_before_update
+        if old is not None:
+            self.acq.recorder = CsvRecorder(
+                old.directory, self.acq.channels, self.acq.adc,
+                self.acq.averaging, **old.options(),
+            )
+        if self._was_running_before_update:
+            self.acq.start()
+        self._update_ui()
+
+    def restart_after_update(self, dialog):
+        self.update_requested = True
+        dialog.accept()
+        self.close()
 
     def closeEvent(self, event):
         self._closing = True

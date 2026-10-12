@@ -17,6 +17,20 @@ Raspberry Pi-only GPIO/SPI setup. With `adc.type = "auto"`, it uses `MockAdc`.
 
 ## Raspberry Pi OS
 
+### Prepare one-click updates
+
+Install the project using `git clone` and keep its `main` branch tracking
+`origin/main`. After the initial `bash setup.sh`, operators can click
+**Check for updates** in the app whenever the maintainer pushes a new commit.
+The Pi needs internet access for the check and for any new Python packages.
+The updater does not run `sudo` or upgrade Raspberry Pi OS packages; hardware
+or system package changes still require an administrator.
+
+Keep site-specific code edits out of tracked files. Changes to `config.py` or
+other tracked files block the automated update to protect those edits. Saved
+CSV files in `logs/` and `recording_settings.json` remain on the Pi. Updating
+stops acquisition and creates a measurement gap before the app restarts.
+
 ### Prerequisites
 
 - Raspberry Pi with Raspberry Pi OS

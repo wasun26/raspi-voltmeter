@@ -33,6 +33,9 @@ ADS1256 has one converter behind a multiplexer, so EX1-EX3 are scanned sequentia
 
 ## Current Baseline
 
+- One-click Git update check and fast-forward installation are implemented in
+  the GUI. Local Git and mock tests pass; Raspberry Pi hardware validation is
+  still pending. The update stops acquisition and leaves a measurement gap.
 - ADS1256 driver, Waveshare-style SPI, manual BCM 22 CS, BCM 17 DRDY, and BCM 18 RESET are implemented.
 - Raspberry Pi 5 uses `rpi-lgpio`; Pi 4 retains `RPi.GPIO`; macOS uses `MockAdc` in auto mode.
 - Current default is one differential pair AIN0-AIN1, gain 64, 30 SPS, and VREF 2.5 V.
