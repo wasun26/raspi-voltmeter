@@ -20,6 +20,8 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QComboBox,
     QSpinBox,
+    QSizePolicy,
+    QStatusBar,
     QTabWidget,
     QToolBar,
     QVBoxLayout,
@@ -80,6 +82,7 @@ class MainWindow(QMainWindow):
 
         self._setup_ui()
         self._setup_menus()
+        self._setup_footer()
         self.timer = QTimer()
         self.timer.setInterval(100)
         self.timer.timeout.connect(self._update_ui)
@@ -90,6 +93,60 @@ class MainWindow(QMainWindow):
         self._update_ui()
         if collection_mode:
             self.collection_mode_action.setChecked(True)
+
+    def _setup_footer(self):
+        footer = QStatusBar(self)
+        self.setStatusBar(footer)
+        self.footer_state = QLabel()
+        self.footer_state.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.footer_state.setMinimumWidth(0)
+        footer.addWidget(self.footer_state, 1)
+        self.footer_adc = QLabel()
+        footer.addPermanentWidget(self.footer_adc)
+        self.footer_saved = QLabel()
+        footer.addPermanentWidget(self.footer_saved)
+        footer.addPermanentWidget(QLabel(f"v{APP_VERSION}"))
+
+    def _update_footer(self):
+        capture = self.acq.last_scan_metadata
+        source = type(self.acq.adc).__name__
+        gain = capture.get("gain", self.acq.adc.gain)
+        auto = capture.get("gain_mode", "auto" if self.acq.auto_gain.enabled else "manual") == "auto"
+        self.footer_adc.setText(f"{source}{' (SIM)' if source == 'MockAdc' else ''} | {'Auto' if auto else 'Manual'} x{gain}")
+        self.footer_adc.setToolTip("SIMULATED DATA" if source == "MockAdc" else "Real ADC | Channels are sampled sequentially")
+        self.footer_adc.setStyleSheet("color: #9A6700;" if source == "MockAdc" else "")
+        mode = "Collection" if self._collection_mode else "Live"
+        color = "#666"
+        detail = ""
+        if self.acq.recording_retrying:
+            state, color = "Storage retry - reading paused", "#9A6700"
+            detail = str(self.acq.recording_error)
+        elif self.acq.recording_error is not None or self._last_error is not None:
+            state, color = "ERROR", "#C62828"
+            detail = str(self.acq.recording_error or self._last_error)
+        elif self.acq.pending_recording is not None:
+            state, color = "Paused - unsaved sample", "#9A6700"
+        elif not self.acq._running:
+            state = "Paused"
+        elif self.acq.recorder is None:
+            state, color = "Measuring - saving disabled", "#9A6700"
+        elif not self.acq.recorder.saved_count:
+            state = "Waiting for first saved sample"
+        else:
+            state, color = "Recording", "#2E7D32"
+        if capture.get("clipped"):
+            state += " | CLIPPED"
+            if color != "#C62828":
+                color = "#9A6700"
+        text = f"{mode} | {state}"
+        self.footer_state.setText(text)
+        self.footer_state.setToolTip(f"{text}\n{detail}".strip())
+        self.footer_state.setStyleSheet(f"color: {color};")
+        recorder = self.acq.recorder
+        self.footer_saved.setText(f"CSV: {recorder.saved_count:,}" if recorder else "CSV: Off")
+        self.footer_saved.setToolTip(
+            f"{self.recording_label.text()}\n{recorder.path or recorder.directory}\n{self.last_saved_label.text()}"
+            if recorder else "CSV recording is disabled")
 
     def _setup_ui(self):
         w = QWidget()
@@ -340,8 +397,6 @@ class MainWindow(QMainWindow):
         self.update_action.triggered.connect(self._show_update_dialog)
         mode_toolbar.addAction(self.update_action)
         self.addToolBar(mode_toolbar)
-        self.mode_label = QLabel()
-        self.statusBar().addWidget(self.mode_label, 1)
 
         view_menu = menu_bar.addMenu("&View")
         self.recording_panel_action = self.recording_dock.toggleViewAction()
@@ -512,6 +567,7 @@ class MainWindow(QMainWindow):
             return
         self._update_range_label()
         self._update_recording_ui()
+        self._update_footer()
         source = type(self.acq.adc).__name__
         if source == "MockAdc":
             source += " / SIMULATED DATA"
@@ -521,7 +577,9 @@ class MainWindow(QMainWindow):
         clipped = " | CLIPPED / check input" if capture.get("clipped") else ""
         if self.acq.clipped_scan_count:
             clipped += f" | Clipped scans: {self.acq.clipped_scan_count:,}"
-        self.mode_label.setText(f"{mode} | {source} | {gain_state}{clipped} | Status refresh: {self.timer.interval() / 1000:g} s")
+        self.footer_state.setToolTip(
+            self.footer_state.toolTip() + "\n"
+            + f"{mode} | {source} | {gain_state}{clipped} | Status refresh: {self.timer.interval() / 1000:g} s")
         if self._last_error is not None:
             retrying = self.acq.recording_retrying
             self.voltage_label.setText("STORAGE RETRY" if retrying else "ERROR")

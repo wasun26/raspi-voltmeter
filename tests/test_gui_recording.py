@@ -60,8 +60,32 @@ class RecordingUiTests(unittest.TestCase):
         self.assertEqual(self.adc.gain, 1)
         self.assertIn("Auto x1", self.win.range_label.text())
         self.win._set_collection_mode(True)
-        self.assertIn("Auto gain x1", self.win.mode_label.text())
+        self.assertIn("Auto x1", self.win.footer_adc.text())
+        self.assertIn("Collection", self.win.footer_state.text())
         self.assertFalse(self.win.gain_combo.isEnabled())
+
+    def test_footer_survives_deferred_deletion_and_layout_changes(self):
+        self.win.show()
+        footer = self.win.statusBar()
+        # Replacing a status bar schedules the old one and its labels for deletion.
+        self.app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self.app.processEvents()
+        self.win._update_ui()
+        self.assertIn("MockAdc", self.win.footer_adc.text())
+        self.win.start_btn.click()
+        self.wait_for_saved(2)
+        self.win._set_collection_mode(True)
+        self.win._reset_panel_layout()
+        self.app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self.app.processEvents()
+        self.win._update_ui()
+        self.assertIs(self.win.statusBar(), footer)
+        self.assertTrue(footer.isVisible())
+        self.assertIn("Collection | Recording", self.win.footer_state.text())
+        self.assertIn("CSV:", self.win.footer_saved.text())
+        self.win._set_collection_mode(False)
+        self.win._update_ui()
+        self.assertIn("Live | Recording", self.win.footer_state.text())
 
     def test_update_closes_file_and_can_resume_after_failed_install(self):
         self.win.start_btn.click()
