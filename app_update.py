@@ -16,6 +16,15 @@ class UpdateInfo:
     available: str
     needs_update: bool
     requirements_changed: bool
+    current_version: str | None = None
+    available_version: str | None = None
+
+
+def _version_at(repo, revision):
+    try:
+        return _git(repo, "show", f"{revision}:VERSION").strip() or None
+    except UpdateError:
+        return None
 
 
 def _run(*args, repo, timeout=120):
@@ -67,7 +76,10 @@ def check_for_update(repo):
     requirements_changed = bool(
         _git(repo, "diff", "--name-only", current, available, "--", "requirements.txt")
     )
-    return UpdateInfo(current, available, current != available, requirements_changed)
+    return UpdateInfo(
+        current, available, current != available, requirements_changed,
+        _version_at(repo, current), _version_at(repo, available),
+    )
 
 
 def install_update(repo, info, python=sys.executable):

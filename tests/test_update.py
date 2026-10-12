@@ -23,6 +23,7 @@ class UpdateTests(unittest.TestCase):
         self.git(self.publisher, "checkout", "-b", "main")
         (self.publisher / "main.py").write_text("print('old')\n", encoding="utf-8")
         (self.publisher / "requirements.txt").write_text("\n", encoding="utf-8")
+        (self.publisher / "VERSION").write_text("0.1.0\n", encoding="utf-8")
         self.commit("initial")
         self.git(self.publisher, "push", "-u", "origin", "main")
         self.git(root, "clone", "--branch", "main", str(self.remote), str(self.installed))
@@ -44,12 +45,14 @@ class UpdateTests(unittest.TestCase):
         settings = self.installed / "recording_settings.json"
         settings.write_text('{"max_data_lines": 25}\n', encoding="utf-8")
         (self.publisher / "main.py").write_text("print('new')\n", encoding="utf-8")
+        (self.publisher / "VERSION").write_text("0.2.0\n", encoding="utf-8")
         self.commit("new version")
         self.git(self.publisher, "push")
 
         info = check_for_update(self.installed)
         self.assertTrue(info.needs_update)
         self.assertFalse(info.requirements_changed)
+        self.assertEqual((info.current_version, info.available_version), ("0.1.0", "0.2.0"))
         install_update(self.installed, info)
         self.assertEqual((self.installed / "main.py").read_text(encoding="utf-8"),
                          "print('new')\n")

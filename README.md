@@ -79,6 +79,13 @@ virtual environment, or run `.\.venv\Scripts\python.exe -B main.py` in PowerShel
 
 ## Update from the app
 
+The current software version is shown in the window title and **Help → About**.
+`VERSION` is the single source of the release number. For each release, bump it
+using `MAJOR.MINOR.PATCH`, commit the change, and tag that commit `vMAJOR.MINOR.PATCH`
+(for example, `v0.1.0`). Push both the commit and tag to publish a release. The
+update checker still detects new commits when their version number is unchanged;
+the dialog shows both the version and short commit ID.
+
 An installed Git checkout on the `main` branch can update itself after the
 maintainer pushes new code to `origin/main`. Click **Check for updates** in the
 toolbar or Help menu. Checking does not interrupt measurement. If a version is

@@ -30,6 +30,7 @@ from gui.chart import create_plot_widget, make_pen
 from core.recording import CsvRecorder
 from config import save_recording_settings
 from gui.recording_settings import RecordingSettingsDialog
+from app_version import APP_VERSION
 
 
 class MainWindow(QMainWindow):
@@ -45,7 +46,7 @@ class MainWindow(QMainWindow):
     ):
         super().__init__()
         self.setLocale(QLocale.c())
-        self.setWindowTitle("Voltmeter - PyQt")
+        self.setWindowTitle(f"Voltmeter v{APP_VERSION}")
         self.resize(960, 760)
         self.setMinimumSize(720, 740)
         self.acq = acquisition_manager
@@ -472,7 +473,7 @@ class MainWindow(QMainWindow):
 
     def _show_about(self):
         QMessageBox.about(self, "About Voltmeter",
-            "Voltmeter\n\nADS1256 differential measurement with live plotting "
+            f"Voltmeter v{APP_VERSION}\n\nADS1256 differential measurement with live plotting "
             "and automatic CSV recording.\n\n"
             f"Current ADC: {type(self.acq.adc).__name__}\n"
             "Built with Python and PyQt6.")

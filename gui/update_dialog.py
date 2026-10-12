@@ -65,11 +65,15 @@ class UpdateDialog(QDialog):
         if error is not None:
             self.status.setText(f"Could not check for updates:\n{error}")
         elif not info.needs_update:
-            self.status.setText("Voltmeter is up to date.")
+            version = f"v{info.current_version}" if info.current_version else info.current[:8]
+            self.status.setText(f"Voltmeter {version} is up to date.")
         else:
             self.info = info
+            current = f"v{info.current_version}" if info.current_version else info.current[:8]
+            available = f"v{info.available_version}" if info.available_version else info.available[:8]
             self.status.setText(
-                f"An update is available ({info.available[:8]}). "
+                f"An update is available: {current} ({info.current[:8]}) → "
+                f"{available} ({info.available[:8]}). "
                 "Updating will pause measurement, close the current CSV file, "
                 "and restart the app. Saved files will be kept."
             )

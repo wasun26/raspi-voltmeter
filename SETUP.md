@@ -1,5 +1,8 @@
 # Setup
 
+The installed version appears in the window title and Help → About. Release
+numbers live in `VERSION`; Git release tags use the same number with a `v` prefix.
+
 Setup instructions for Raspberry Pi OS and development machines.
 
 ## macOS

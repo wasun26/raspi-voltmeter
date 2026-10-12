@@ -63,7 +63,7 @@ class RecordingUiTests(unittest.TestCase):
 
     def test_update_button_checks_then_restarts_after_install(self):
         self.win.show()
-        info = UpdateInfo("a" * 40, "b" * 40, True, False)
+        info = UpdateInfo("a" * 40, "b" * 40, True, False, "0.1.0", "0.2.0")
         with patch("gui.update_dialog.check_for_update", return_value=info), \
              patch("gui.update_dialog.install_update") as install:
             dialog = UpdateDialog(self.win)
@@ -72,6 +72,8 @@ class RecordingUiTests(unittest.TestCase):
                 self.app.processEvents()
                 time.sleep(0.01)
             self.assertTrue(dialog.update_button.isEnabled())
+            self.assertIn("v0.1.0", self.win.windowTitle())
+            self.assertIn("v0.2.0", dialog.status.text())
             dialog.update_button.click()
             deadline = time.monotonic() + 2
             while not self.win.update_requested and time.monotonic() < deadline:

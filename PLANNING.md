@@ -1,5 +1,10 @@
 # Planning
 
+Software versioning: implemented with `VERSION` and matching Git release tags,
+starting at `v0.1.0`. The update dialog displays release numbers and commit IDs;
+updates continue to follow new commits on `origin/main`. Raspberry Pi update
+behavior remains to be hardware-validated.
+
 ## Project
 
 **การพัฒนาต้นแบบและการวัดสัญญาณของวัสดุผสมเพียโซอิเล็กทริกที่มีซีเมนต์เป็นฐานสำหรับการใช้เซ็นเซอร์ในการตรวจสอบสภาพโครงสร้าง**
