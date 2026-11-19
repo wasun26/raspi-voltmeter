@@ -27,6 +27,31 @@ CHANNEL_CAPTURE_FIELDS = (
 )
 
 
+def columns_for_channels(columns, channels):
+    """Project saved CSV preferences onto the selected channels."""
+    if not isinstance(columns, (list, tuple)) or any(not isinstance(col, str) for col in columns):
+        return columns  # Let CsvRecorder validate malformed settings.
+    names = [channel_name(ch) for ch in channels]
+    fields = ("mV", *CHANNEL_CAPTURE_FIELDS)
+    channel_column = re.compile(r"(AD\d+-AD\d+|CH\d+)_(" + "|".join(fields) + r")")
+    selected = []
+    present = set()
+    for column in columns:
+        match = channel_column.fullmatch(column)
+        if match:
+            name = match[1]
+            if name not in names:
+                continue
+            present.add(name)
+        selected.append(column)
+    for name in names:
+        if name not in present:
+            selected.extend(f"{name}_{field}" for field in fields)
+    if not any(f"{name}_mV" in selected for name in names):
+        selected.extend(f"{name}_mV" for name in names)
+    return selected
+
+
 def sync_directory(directory):
     if os.name == "posix":
         fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
@@ -158,12 +183,13 @@ class CsvRecorder:
         self._next_space_check = 0.0
 
     def write_with_retry(self, timestamp, readings, stop_event, on_retry=None,
-                         captured_monotonic=None):
-        """Retry one pending sample without acquiring or buffering later samples."""
+                         captured_monotonic=None, finish_on_stop=False):
+        """Retry a sample until stopped. A fresh scan can get one write attempt on stop."""
         retrying = False
         if captured_monotonic is None:
             captured_monotonic = time.monotonic()
-        while not stop_event.is_set():
+        while finish_on_stop or not stop_event.is_set():
+            finish_on_stop = False
             try:
                 self.recover()
                 self.write(timestamp, readings, captured_monotonic=captured_monotonic)

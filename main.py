@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import QApplication
 from config import DEFAULT, load_recording_settings, load_gain_settings
 from hardware.adc import MockAdc
 from core.acquisition import AcquisitionManager
-from core.recording import CsvRecorder
+from core.recording import CsvRecorder, columns_for_channels
 from gui.main_window import MainWindow
 
 try:
@@ -64,14 +64,17 @@ def main():
     adc_settings["gain"] = auto_settings["min_gain"] if gain_settings["auto"] else gain_settings["gain"]
     adc = create_adc(adc_settings)
     print(f"[main] ADC in use: {adc.__class__.__name__}")
+    channels = DEFAULT.get("channels", [0])
+    recording_settings["included_columns"] = columns_for_channels(
+        recording_settings["included_columns"], channels)
     recorder = CsvRecorder(
-        recording_settings.pop("directory"), DEFAULT.get("channels", [0]), adc,
+        recording_settings.pop("directory"), channels, adc,
         DEFAULT.get("averaging", 1),
         **recording_settings,
     ) if DEFAULT.get("log_enabled", True) else None
     acq = AcquisitionManager(
         adc_device=adc,
-        channels=DEFAULT.get("channels", [0]),
+        channels=channels,
         sample_rate=DEFAULT.get("sample_rate", 20),
         averaging=DEFAULT.get("averaging", 1),
         recorder=recorder,

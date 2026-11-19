@@ -207,7 +207,18 @@ The default channel list is:
 "channels": [(0, 1)]
 ```
 
-This means differential `AD0-AD1`.
+This enables differential `EX1` (`AD0-AD1`) at startup. In the GUI, pause,
+select the desired channels under **Measurement**, choose **Apply channels**,
+and start measurement. EX2 uses `AD2-AD3` and EX3 uses `AD4-AD5`.
+Leave `AD6-AD7` available as a spare/reference. To enable EX1 and EX3 at
+startup, set `"channels": [(0, 1), (4, 5)]` in `config.py`.
+
+The ADS1256 reads enabled pairs sequentially. A channel change starts a new
+CSV on the next reading. To verify a non-adjacent selection without hardware:
+
+```bash
+python serial_monitor.py --mock --rate 5 --channels 0-1,4-5 --count 5 --no-log
+```
 
 ## Troubleshooting
 

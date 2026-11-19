@@ -7,7 +7,7 @@ import time
 
 from config import DEFAULT, load_recording_settings
 from hardware.adc import MockAdc
-from core.recording import CsvRecorder
+from core.recording import CsvRecorder, columns_for_channels
 from core.auto_gain import AutoGain, read_scan
 
 try:
@@ -118,7 +118,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Serial monitor for ADC readings")
     parser.add_argument(
-        "--rate", type=float, default=DEFAULT.get("sample_rate", 20), help="Sample rate (Hz)")
+        "--rate", type=float, default=DEFAULT.get("sample_rate", 20), help="Target scans per second")
     parser.add_argument("--adc", choices=["auto", "ads1256", "mock"], default=None,
                         help="ADC backend. ads1256 requires real Raspberry Pi hardware; auto falls back to mock.")
     default_channels = DEFAULT.get("channels", [0])
@@ -220,7 +220,9 @@ def main():
     fs_scaled = full_scale * scale
 
     print(
-        f"ADC: {adc.__class__.__name__} | Rate: {args.rate} Hz | Channels: {', '.join(format_channel(ch) for ch in channels)}")
+        f"ADC: {adc.__class__.__name__} | Scan target: {args.rate:g} Hz | Channels: {', '.join(format_channel(ch) for ch in channels)}")
+    if len(channels) > 1:
+        print("Channels are sampled sequentially in the listed order.")
     if fallback_error is not None:
         print(f"Auto mode fallback: ADS1256 unavailable ({fallback_error})")
     if single_ended:
@@ -232,7 +234,7 @@ def main():
     mode_text = "single-ended" if single_ended else "differential"
     print(f"Mode: {mode_text} | Gain: {gain:g} | Vref: {vref:g} V | Range: {range_text} | Unit: {unit}{rate_text}")
     if controller.enabled:
-        print("Auto gain enabled; displayed range is the starting range. All channels are sampled sequentially.")
+        print("Auto gain enabled; displayed range is the starting range.")
     print("Press Ctrl+C to stop.\n")
 
     period = 1.0 / args.rate if args.rate > 0 else 0.1
@@ -249,7 +251,7 @@ def main():
             recorder = CsvRecorder(args.log_dir, channels, adc, args.averaging,
                                    max_data_lines=args.max_data_lines, file_prefix=args.file_prefix,
                                    rotate_daily=args.daily_rotation, min_free_mb=args.min_free_mb,
-                                   included_columns=recording_settings["included_columns"],
+                                   included_columns=columns_for_channels(recording_settings["included_columns"], channels),
                                    retry_interval_sec=args.retry_seconds)
             recording_failed = False
             print(f"CSV directory: {recorder.directory} (flush + fsync every sample)")

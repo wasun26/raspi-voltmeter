@@ -3,6 +3,7 @@ import csv
 import os
 from pathlib import Path
 import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -50,6 +51,67 @@ class RecordingUiTests(unittest.TestCase):
             time.sleep(0.01)
         self.assertGreaterEqual(self.acq.recorder.saved_count, minimum)
         self.win._update_ui()
+
+    def test_specimen_selection_reads_fixed_pairs_and_rotates_csv(self):
+        first, second, third = (0, 1), (2, 3), (4, 5)
+        checks = self.win.channel_checks
+        checks[first].setChecked(False)
+        self.assertFalse(self.win.apply_channels_btn.isEnabled())
+        self.assertEqual(self.acq.channels, [first])
+        for pair in (third, second, first):
+            checks[pair].setChecked(True)
+        self.win.apply_channels_btn.click()
+        self.assertEqual(self.acq.channels, [first, second, third])
+        with patch.object(self.adc, "read_voltage", wraps=self.adc.read_voltage) as read:
+            self.win.start_btn.click()
+            self.wait_for_saved()
+            self.assertTrue(all(not check.isEnabled() for check in checks.values()))
+            self.win.start_btn.click()
+            self.assertEqual([call.args[0] for call in read.call_args_list[:3]], [first, second, third])
+        self.assertIn("EX2", self.win.voltage_label.text())
+        old_path = self.acq.recorder.path
+        old_contents = old_path.read_bytes()
+
+        checks[second].setChecked(False)
+        self.win.apply_channels_btn.click()
+        self.assertEqual(self.acq.channels, [first, third])
+        self.assertEqual(list(self.win.curves), [first, third])
+        self.assertIn("Sequential scan", self.win.source_label.text())
+        self.assertEqual(self.win.voltage_label.text(), "-- mV")
+        with patch.object(self.adc, "read_voltage", wraps=self.adc.read_voltage) as read:
+            self.win.start_btn.click()
+            self.wait_for_saved()
+            self.win.start_btn.click()
+            self.assertEqual([call.args[0] for call in read.call_args_list],
+                             [first, third] * self.acq.recorder.saved_count)
+        self.assertIn("EX1", self.win.voltage_label.text())
+        self.assertNotIn("EX2", self.win.voltage_label.text())
+        self.assertIn("EX3", self.win.voltage_label.text())
+        self.assertEqual(old_path.read_bytes(), old_contents)
+        with self.acq.recorder.path.open(newline="") as handle:
+            row = next(csv.DictReader(handle))
+        self.assertIn("AD0-AD1_mV", row)
+        self.assertIn("AD4-AD5_mV", row)
+        self.assertIn("AD4-AD5_conversion_unix_s", row)
+        self.assertNotIn("AD2-AD3_mV", row)
+
+    def test_pause_saves_in_progress_scan_before_channels_can_change(self):
+        entered = threading.Event()
+        read_voltage = self.adc.read_voltage
+
+        def read_while_pausing(channel):
+            entered.set()
+            self.acq._stop_event.wait(timeout=2)
+            return read_voltage(channel)
+
+        with patch.object(self.adc, "read_voltage", side_effect=read_while_pausing):
+            self.win.start_btn.click()
+            self.assertTrue(entered.wait(timeout=2))
+            self.win.start_btn.click()
+        self.assertEqual(self.recorder.saved_count, 1)
+        self.assertIsNone(self.acq.pending_recording)
+        self.win.channel_checks[(4, 5)].setChecked(True)
+        self.assertTrue(self.win.apply_channels_btn.isEnabled())
 
     def test_auto_gain_switch_is_queued_and_visible_in_collection_mode(self):
         self.win.gain_combo.setCurrentIndex(0)

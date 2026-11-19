@@ -7,6 +7,8 @@ import tempfile
 RECORDING_SETTINGS_PATH = Path(__file__).resolve().parent / "recording_settings.json"
 GAIN_SETTINGS_PATH = Path(__file__).resolve().parent / "gain_settings.json"
 
+SPECIMEN_CHANNELS = {(0, 1): "EX1", (2, 3): "EX2", (4, 5): "EX3"}
+
 DEFAULT = {
     "adc": {
         "type": "auto",

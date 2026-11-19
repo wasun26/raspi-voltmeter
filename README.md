@@ -17,7 +17,7 @@ The default application mode is tuned for low-level millivolt differential measu
 - RESET pin: BCM `18`
 - Manual CS pin: BCM `22`
 - Expected ADS1256 chip ID: `3`
-- Input mode: differential `AD0-AD1`
+- Input mode: differential, with `EX1` (`AD0-AD1`) enabled at startup
 - PGA gain: `64`
 - ADC data rate: `30` SPS by default
 - Vref: `2.5` V
@@ -76,6 +76,30 @@ On non-Raspberry Pi machines, `main.py` and `serial_monitor.py` use `MockAdc` wh
 
 On Windows, double-click `run_voltmeter.bat` to open the GUI using the project's
 virtual environment, or run `.\.venv\Scripts\python.exe -B main.py` in PowerShell.
+
+## Specimen channels
+
+Pause measurement, select one to three channels in the **Measurement** panel,
+choose **Apply channels**, then start measurement. Checkboxes apply to the
+current app session. Set `channels` in `config.py` to change the startup selection.
+
+| Specimen | Differential input on the Waveshare board |
+| --- | --- |
+| EX1 | `AD0 − AD1` |
+| EX2 | `AD2 − AD3` |
+| EX3 | `AD4 − AD5` |
+
+`AD6 − AD7` is reserved for a spare or reference input. Selecting just EX1 and
+EX3 reads `AD0 − AD1`, then `AD4 − AD5`, skipping EX2. The live readout and plot
+show the enabled specimens. Applying a different set starts a new CSV on the
+next reading, with columns for the enabled pairs. Previous files keep their
+headers and data. Recordings retain pin-based names such as `AD4-AD5_mV`.
+
+The ADS1256 samples the selected channels sequentially. **Scan target** is
+the requested number of complete scans per second. ADC data rate is measured
+in conversions per second. At 30 SPS, three channels with averaging set to 1
+can each get up to 10 readings per second before switching, settling and
+recording overhead. By default, CSV logs each conversion timestamp by pair.
 
 ## Auto gain
 

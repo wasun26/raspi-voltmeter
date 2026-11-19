@@ -58,15 +58,14 @@ class MockAdc(AdcDevice):
 
         self._t0 = time.time()
         self._error_counter = 0
-        self._last_sample_time = 0.0
-        self._last_value = self.offset
+        self._last_samples = {}
 
     def set_sample_rate(self, rate_hz: float):
         self.sample_rate = float(rate_hz)
 
     def set_gain(self, gain: int):
         self.gain = int(gain)
-        self._last_sample_time = 0.0
+        self._last_samples.clear()
 
     def _quantize(self, value: float) -> float:
         full_scale = self.vref / max(self.gain, 1)
@@ -104,16 +103,17 @@ class MockAdc(AdcDevice):
             return self._quantize(self.offset)
 
         now = time.time()
-        if self.sample_rate > 0:
-            interval = 1.0 / self.sample_rate
-            if now - self._last_sample_time < interval:
-                return self._last_value
+        key = tuple(channel) if isinstance(channel, list) else channel
+        previous = self._last_samples.get(key)
+        if previous is not None and self.sample_rate > 0:
+            sampled_at, voltage, raw = previous
+            if now - sampled_at < 1.0 / self.sample_rate:
+                self.last_raw = raw
+                return voltage
 
-        value = self._generate_sample()
-        quantized = self._quantize(value)
-        self._last_value = quantized
-        self._last_sample_time = now
-        return quantized
+        voltage = self._quantize(self._generate_sample())
+        self._last_samples[key] = (now, voltage, self.last_raw)
+        return voltage
 
 
 class ADS1256(AdcDevice):
