@@ -352,6 +352,19 @@ class RecordingUiTests(unittest.TestCase):
         self.assertIs(self.acq.recorder, self.recorder)
         warning.assert_called_once()
 
+    def test_voltage_only_preset_replaces_detailed_columns_and_follows_channels(self):
+        dialog = RecordingSettingsDialog(self.recorder, self.win)
+        dialog._select_voltage_only()
+        self.assertEqual(dialog.recording_options()["included_columns"], ["AD0-AD1_mV"])
+        self.assertTrue(self.win._apply_recording_settings(dialog.recording_options()))
+        self.win.channel_checks[(4, 5)].setChecked(True)
+        self.win.apply_channels_btn.click()
+        self.win.start_btn.click()
+        self.wait_for_saved()
+        self.win.start_btn.click()
+        with self.acq.recorder.path.open(newline="") as handle:
+            self.assertEqual(csv.DictReader(handle).fieldnames, ["AD0-AD1_mV", "AD4-AD5_mV"])
+
     def test_numeric_controls_use_ascii_digits_under_arabic_system_locale(self):
         previous = QLocale()
         QLocale.setDefault(QLocale("ar_EG"))

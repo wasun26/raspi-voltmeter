@@ -5,8 +5,9 @@ x1 startup, 80% reduction threshold, 20%/10-second quiet increase criterion and
 3-second increase cooldown. GUI gain-mode choices persist across restarts/updates
 and override config. Manual x64 remains default. Acquisition owns gain
 changes; ADS1256 waits for automatic calibration and verifies the PGA register.
-CSV retains capture-time gain, per-conversion raw counts/timestamps, clipping and
-gain-change metadata even across storage retries. Auto requires these fields.
+Acquisition retains capture-time gain, per-conversion raw counts and timestamps,
+clipping and gain-change metadata across storage retries. Detailed CSVs can
+store those fields. Voltage-only CSVs store the enabled pairs in mV.
 Mock and driver-call tests cover bipolar clipping, averaging, channel peaks,
 hysteresis and metadata preservation. Real hardware settling, timing gaps,
 source-loading effects at different gains and transient accuracy remain planned
@@ -153,8 +154,9 @@ Exit: repeatable end-to-end results and documented limitations for the project r
 ## Out of Scope Until Characterized
 
 Durable CSV recording now runs in the acquisition path and terminal monitor:
-flush/fsync per reading, daily/session file separation, explicit ADC source and
-mV units, stop on recording failure, and graceful shutdown before file closure.
+flush/fsync per reading, daily/session file separation, measured voltage in mV by
+default, optional ADC source and capture metadata, and graceful shutdown before
+file closure.
 `voltmeter.service.example` provides opt-in unattended startup on Raspberry Pi OS.
 Mock tests cover rotation, session preservation, sync failures, and shutdown.
 Real hardware, month-long operation, and abrupt power-loss testing remain site

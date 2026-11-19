@@ -27,8 +27,14 @@ CHANNEL_CAPTURE_FIELDS = (
 )
 
 
+def voltage_columns(channels):
+    return tuple(f"{channel_name(ch)}_mV" for ch in channels)
+
+
 def columns_for_channels(columns, channels):
     """Project saved CSV preferences onto the selected channels."""
+    if columns is None:
+        return voltage_columns(channels)
     if not isinstance(columns, (list, tuple)) or any(not isinstance(col, str) for col in columns):
         return columns  # Let CsvRecorder validate malformed settings.
     names = [channel_name(ch) for ch in channels]
@@ -36,19 +42,23 @@ def columns_for_channels(columns, channels):
     channel_column = re.compile(r"(AD\d+-AD\d+|CH\d+)_(" + "|".join(fields) + r")")
     selected = []
     present = set()
+    detailed = False
     for column in columns:
         match = channel_column.fullmatch(column)
+        if not match or match[2] != "mV":
+            detailed = True
         if match:
             name = match[1]
             if name not in names:
                 continue
             present.add(name)
         selected.append(column)
+    new_fields = fields if detailed else ("mV",)
     for name in names:
         if name not in present:
-            selected.extend(f"{name}_{field}" for field in fields)
-    if not any(f"{name}_mV" in selected for name in names):
-        selected.extend(f"{name}_mV" for name in names)
+            selected.extend(f"{name}_{field}" for field in new_fields)
+    if not set(selected).intersection(voltage_columns(channels)):
+        selected.extend(voltage_columns(channels))
     return selected
 
 
@@ -99,10 +109,10 @@ class CsvRecorder:
         if not self.directory.is_dir():
             raise NotADirectoryError(str(self.directory))
         self.channels = tuple(channels)
-        channel_columns = tuple(f"{channel_name(ch)}_mV" for ch in self.channels)
+        self.voltage_columns = voltage_columns(self.channels)
         capture_columns = tuple(f"{channel_name(ch)}_{field}" for ch in self.channels
                                 for field in CHANNEL_CAPTURE_FIELDS)
-        available = METADATA_COLUMNS + channel_columns + capture_columns
+        available = METADATA_COLUMNS + self.voltage_columns + capture_columns
         if len(set(available)) != len(available):
             raise ValueError("CSV column names must be unique")
         if included_columns is None:
@@ -110,12 +120,12 @@ class CsvRecorder:
         if (not isinstance(included_columns, (list, tuple))
                 or any(not isinstance(column, str) for column in included_columns)
                 or len(set(included_columns)) != len(included_columns)
-                or "timestamp" not in included_columns
-                or not any(column in included_columns for column in channel_columns)
+                or not any(column in included_columns for column in self.voltage_columns)
                 or any(column not in available for column in included_columns)):
-            raise ValueError("Select timestamp and at least one voltage channel; use available CSV columns only")
+            raise ValueError("Select at least one voltage channel; use available CSV columns only")
         self.available_columns = available
         self.included_columns = tuple(column for column in available if column in included_columns)
+        self._voltage_only = set(self.included_columns).issubset(self.voltage_columns)
         self.adc = adc
         self.averaging = averaging
         self.path = None
@@ -219,7 +229,7 @@ class CsvRecorder:
             raise RuntimeError(f"Recording previously failed: {self.error}")
         try:
             metadata = getattr(readings, "metadata", {})
-            if metadata.get("gain_mode") == "auto":
+            if metadata.get("gain_mode") == "auto" and not self._voltage_only:
                 # Keep gain and capture flags even if an old preference hid them.
                 required = set(METADATA_COLUMNS[6:])
                 required.update(f"{channel_name(ch)}_{field}" for ch in self.channels
@@ -251,8 +261,9 @@ class CsvRecorder:
             for channel, captured in metadata.get("channels", {}).items():
                 values.update((f"{channel_name(channel)}_{key}", value)
                               for key, value in captured.items())
-            values.update((f"{channel_name(ch)}_mV", format(readings[ch] * 1000.0, ".12g"))
-                          for ch in self.channels if f"{channel_name(ch)}_mV" in self.included_columns)
+            values.update((column, format(readings[ch] * 1000.0, ".12g"))
+                          for ch, column in zip(self.channels, self.voltage_columns)
+                          if column in self.included_columns)
             self._writer.writerow([values.get(column, "") for column in self.included_columns])
             self._sync()
             self.saved_count += 1

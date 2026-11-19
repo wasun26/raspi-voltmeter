@@ -4,8 +4,9 @@ from PyQt6.QtCore import QLocale
 
 from PyQt6.QtWidgets import (
     QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
-    QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QSpinBox, QVBoxLayout,
+    QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QScrollArea, QSpinBox, QVBoxLayout,
     QPushButton,
+    QWidget,
 )
 
 
@@ -68,18 +69,26 @@ class RecordingSettingsDialog(QDialog):
         form.addRow("Storage retry interval", retry_row)
         layout.addLayout(form)
         columns_group = QGroupBox("CSV columns")
-        columns_layout = QGridLayout(columns_group)
+        group_layout = QVBoxLayout(columns_group)
+        self.voltage_columns = recorder.voltage_columns
+        simple_columns = QPushButton("Voltage only (mV)")
+        simple_columns.clicked.connect(self._select_voltage_only)
+        group_layout.addWidget(simple_columns)
+        columns_scroll = QScrollArea()
+        columns_scroll.setWidgetResizable(True)
+        columns_scroll.setMaximumHeight(200)
+        columns_widget = QWidget()
+        columns_layout = QGridLayout(columns_widget)
         self.column_checks = {}
         for index, column in enumerate(recorder.available_columns):
             check = QCheckBox(column)
             check.setChecked(column in recorder.included_columns)
-            if column == "timestamp":
-                check.setEnabled(False)
-                check.setToolTip("Required to identify when each reading was taken.")
             columns_layout.addWidget(check, index // 2, index % 2)
             self.column_checks[column] = check
+        columns_scroll.setWidget(columns_widget)
+        group_layout.addWidget(columns_scroll)
         layout.addWidget(columns_group)
-        safety = QLabel("CSV • mV • Sync every reading\nStorage errors pause new readings and retry the pending sample. No automatic deletion or overwriting.")
+        safety = QLabel("CSV • Sync every reading\nStorage errors pause new readings and retry the pending sample. No automatic deletion or overwriting.")
         safety.setWordWrap(True)
         layout.addWidget(safety)
         self.remember = QCheckBox("Remember these settings for next launch")
@@ -90,6 +99,10 @@ class RecordingSettingsDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _select_voltage_only(self):
+        for column, check in self.column_checks.items():
+            check.setChecked(column in self.voltage_columns)
 
     def _browse(self):
         directory = QFileDialog.getExistingDirectory(self, "Choose save folder", self.directory.text())
@@ -111,7 +124,7 @@ class RecordingSettingsDialog(QDialog):
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", options["file_prefix"]):
             QMessageBox.warning(self, "Recording settings", "Prefix must start with a letter or number and contain only letters, numbers, underscores or hyphens.")
             return
-        if not any(column.endswith("_mV") for column in options["included_columns"]):
+        if not set(self.voltage_columns).intersection(options["included_columns"]):
             QMessageBox.warning(self, "Recording settings", "Select at least one voltage channel to save.")
             return
         super().accept()

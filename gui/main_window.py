@@ -311,7 +311,7 @@ class MainWindow(QMainWindow):
             actions.addWidget(button)
         actions.addStretch()
         recording_layout.addLayout(actions, 6, 0, 1, 3)
-        hint = QLabel("Auto-save every reading in mV • Pause stops measurement and saving • Existing files are kept")
+        hint = QLabel("Auto-save every reading to CSV • Pause stops measurement and saving")
         hint.setWordWrap(True)
         hint.setStyleSheet("color: #666; font-size: 11px;")
         recording_layout.addWidget(hint, 7, 0, 1, 3)
@@ -523,7 +523,7 @@ class MainWindow(QMainWindow):
 
     def _show_recording_guide(self):
         QMessageBox.information(self, "Recording guide",
-            "Readings are saved automatically to CSV in mV.\n\n"
+            "CSV defaults to the enabled channels’ voltage in mV.\n\n"
             "Pause measurement (Ctrl+Space) stops both reading and saving. "
             "Start measurement resumes the current session.\n\n"
             "While paused, select EX1–EX3 in Measurement and choose Apply channels. "

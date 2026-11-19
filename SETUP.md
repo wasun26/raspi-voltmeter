@@ -286,8 +286,10 @@ Verify CSV output before installing the service:
 python serial_monitor.py --adc ads1256 --channels 0-1 --rate 30 --count 10
 ```
 
-CSV files are in `logs/` by default. Confirm that `adc_source` is `ADS1256` and
-that the `AD0-AD1_mV` column has ten data rows.
+CSV files are in `logs/` by default. Confirm the terminal reports `ADC: ADS1256`
+and the default CSV has ten data rows in its `AD0-AD1_mV` column. If a saved
+column selection is active, choose **Voltage only (mV)** in Recording settings
+and remember the change to restore the default for GUI and terminal runs.
 
 Recording defaults in `config.py` limit each CSV to 100,000 data rows and reserve
 100 MiB of free drive space. Full files roll over without stopping; low space
