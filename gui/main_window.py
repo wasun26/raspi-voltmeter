@@ -20,6 +20,8 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QComboBox,
     QSpinBox,
+    QSizePolicy,
+    QStatusBar,
     QTabWidget,
     QToolBar,
     QVBoxLayout,
@@ -28,7 +30,7 @@ from PyQt6.QtWidgets import (
 
 from gui.chart import create_plot_widget, make_pen
 from core.recording import CsvRecorder
-from config import save_recording_settings
+from config import save_recording_settings, save_gain_settings
 from gui.recording_settings import RecordingSettingsDialog
 from app_version import APP_VERSION
 
@@ -80,6 +82,7 @@ class MainWindow(QMainWindow):
 
         self._setup_ui()
         self._setup_menus()
+        self._setup_footer()
         self.timer = QTimer()
         self.timer.setInterval(100)
         self.timer.timeout.connect(self._update_ui)
@@ -90,6 +93,60 @@ class MainWindow(QMainWindow):
         self._update_ui()
         if collection_mode:
             self.collection_mode_action.setChecked(True)
+
+    def _setup_footer(self):
+        footer = QStatusBar(self)
+        self.setStatusBar(footer)
+        self.footer_state = QLabel()
+        self.footer_state.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.footer_state.setMinimumWidth(0)
+        footer.addWidget(self.footer_state, 1)
+        self.footer_adc = QLabel()
+        footer.addPermanentWidget(self.footer_adc)
+        self.footer_saved = QLabel()
+        footer.addPermanentWidget(self.footer_saved)
+        footer.addPermanentWidget(QLabel(f"v{APP_VERSION}"))
+
+    def _update_footer(self):
+        capture = self.acq.last_scan_metadata
+        source = type(self.acq.adc).__name__
+        gain = capture.get("gain", self.acq.adc.gain)
+        auto = capture.get("gain_mode", "auto" if self.acq.auto_gain.enabled else "manual") == "auto"
+        self.footer_adc.setText(f"{source}{' (SIM)' if source == 'MockAdc' else ''} | {'Auto' if auto else 'Manual'} x{gain}")
+        self.footer_adc.setToolTip("SIMULATED DATA" if source == "MockAdc" else "Real ADC | Channels are sampled sequentially")
+        self.footer_adc.setStyleSheet("color: #9A6700;" if source == "MockAdc" else "")
+        mode = "Collection" if self._collection_mode else "Live"
+        color = "#666"
+        detail = ""
+        if self.acq.recording_retrying:
+            state, color = "Storage retry - reading paused", "#9A6700"
+            detail = str(self.acq.recording_error)
+        elif self.acq.recording_error is not None or self._last_error is not None:
+            state, color = "ERROR", "#C62828"
+            detail = str(self.acq.recording_error or self._last_error)
+        elif self.acq.pending_recording is not None:
+            state, color = "Paused - unsaved sample", "#9A6700"
+        elif not self.acq._running:
+            state = "Paused"
+        elif self.acq.recorder is None:
+            state, color = "Measuring - saving disabled", "#9A6700"
+        elif not self.acq.recorder.saved_count:
+            state = "Waiting for first saved sample"
+        else:
+            state, color = "Recording", "#2E7D32"
+        if capture.get("clipped"):
+            state += " | CLIPPED"
+            if color != "#C62828":
+                color = "#9A6700"
+        text = f"{mode} | {state}"
+        self.footer_state.setText(text)
+        self.footer_state.setToolTip(f"{text}\n{detail}".strip())
+        self.footer_state.setStyleSheet(f"color: {color};")
+        recorder = self.acq.recorder
+        self.footer_saved.setText(f"CSV: {recorder.saved_count:,}" if recorder else "CSV: Off")
+        self.footer_saved.setToolTip(
+            f"{self.recording_label.text()}\n{recorder.path or recorder.directory}\n{self.last_saved_label.text()}"
+            if recorder else "CSV recording is disabled")
 
     def _setup_ui(self):
         w = QWidget()
@@ -174,6 +231,8 @@ class MainWindow(QMainWindow):
         control_layout.addWidget(gain_label)
 
         self.gain_combo = QComboBox()
+        self.gain_combo.addItem("Auto", None)
+        self.gain_combo.setToolTip("Auto starts at x1. Near full scale: reduce gain; quiet signal: increase slowly. Clipped peaks cannot be recovered.")
         gain_options = self._get_gain_options()
         for g in gain_options:
             self.gain_combo.addItem(f"x{g}", g)
@@ -181,6 +240,7 @@ class MainWindow(QMainWindow):
         control_layout.addWidget(self.gain_combo)
 
         self.range_label = QLabel("Range: --")
+        self.range_label.setWordWrap(True)
         control_layout.addWidget(self.range_label)
         self._set_current_gain()
         control_layout.addStretch()
@@ -337,8 +397,6 @@ class MainWindow(QMainWindow):
         self.update_action.triggered.connect(self._show_update_dialog)
         mode_toolbar.addAction(self.update_action)
         self.addToolBar(mode_toolbar)
-        self.mode_label = QLabel()
-        self.statusBar().addWidget(self.mode_label, 1)
 
         view_menu = menu_bar.addMenu("&View")
         self.recording_panel_action = self.recording_dock.toggleViewAction()
@@ -507,12 +565,21 @@ class MainWindow(QMainWindow):
     def _update_ui(self):
         if self._closing:
             return
+        self._update_range_label()
         self._update_recording_ui()
+        self._update_footer()
         source = type(self.acq.adc).__name__
         if source == "MockAdc":
             source += " / SIMULATED DATA"
         mode = "Data collection: graph off" if self._collection_mode else "Live view" if self._plot_active else "Graph inactive"
-        self.mode_label.setText(f"{mode} | {source} | Status refresh: {self.timer.interval() / 1000:g} s")
+        capture = self.acq.last_scan_metadata
+        gain_state = f"{capture.get('gain_mode', 'manual').title()} gain x{capture.get('gain', self.acq.adc.gain)}"
+        clipped = " | CLIPPED / check input" if capture.get("clipped") else ""
+        if self.acq.clipped_scan_count:
+            clipped += f" | Clipped scans: {self.acq.clipped_scan_count:,}"
+        self.footer_state.setToolTip(
+            self.footer_state.toolTip() + "\n"
+            + f"{mode} | {source} | {gain_state}{clipped} | Status refresh: {self.timer.interval() / 1000:g} s")
         if self._last_error is not None:
             retrying = self.acq.recording_retrying
             self.voltage_label.setText("STORAGE RETRY" if retrying else "ERROR")
@@ -701,15 +768,13 @@ class MainWindow(QMainWindow):
 
     def _change_gain(self):
         gain = self.gain_combo.currentData()
-        if gain is None:
+        try:
+            save_gain_settings(gain)
+        except Exception as exc:
+            QMessageBox.warning(self, "Gain settings", f"Could not save gain selection: {exc}")
+            self._set_current_gain()
             return
-        adc = getattr(self.acq, "adc", None)
-        if adc and hasattr(adc, "set_gain"):
-            try:
-                adc.set_gain(int(gain))
-            except Exception:
-                pass
-        self._update_range_label()
+        self.acq.auto_gain.request_mode(gain)
 
     def _get_gain_options(self):
         adc = getattr(self.acq, "adc", None)
@@ -720,16 +785,23 @@ class MainWindow(QMainWindow):
     def _set_current_gain(self):
         adc = getattr(self.acq, "adc", None)
         current = getattr(adc, "gain", 1)
+        self.gain_combo.blockSignals(True)
+        if self.acq.auto_gain.enabled:
+            self.gain_combo.setCurrentIndex(0)
+            self.gain_combo.blockSignals(False)
+            self._update_range_label()
+            return
         for i in range(self.gain_combo.count()):
             if self.gain_combo.itemData(i) == current:
                 self.gain_combo.setCurrentIndex(i)
                 break
+        self.gain_combo.blockSignals(False)
         self._update_range_label()
 
     def _update_range_label(self):
         adc = getattr(self.acq, "adc", None)
         vref = float(getattr(adc, "vref", 2.5))
-        gain = float(getattr(adc, "gain", 1))
+        gain = float(self.acq.last_scan_metadata.get("gain", getattr(adc, "gain", 1)))
         single_ended = bool(getattr(adc, "single_ended", True))
         full_scale = vref / max(gain, 1.0)
         if not single_ended:
@@ -740,7 +812,10 @@ class MainWindow(QMainWindow):
             text = f"Range: 0-{fs_scaled:.{decimals}f} {unit}"
         else:
             text = f"Range: -{fs_scaled:.{decimals}f} to {fs_scaled:.{decimals}f} {unit}"
-        self.range_label.setText(text)
+        capture = self.acq.last_scan_metadata
+        state = "Auto" if self.acq.auto_gain.enabled else "Manual"
+        warning = " | CLIPPED / input floating or over range" if capture.get("clipped") else ""
+        self.range_label.setText(f"{state} x{gain:g} | {text}{warning}")
 
     def _select_unit(self, full_scale_v: float):
         # Pick unit based on range from gain selection.
@@ -829,6 +904,7 @@ class MainWindow(QMainWindow):
         self._refresh_plot_state()
         self.timer.stop()
         self.acq.stop()
+        self.acq.remove_callback(self._on_data)
         if self.acq.recorder is not None:
             self.acq.recorder.close()
         event.accept()

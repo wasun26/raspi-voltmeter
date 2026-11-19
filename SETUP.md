@@ -1,5 +1,26 @@
 # Setup
 
+## Auto gain setup
+
+GUI Gain selections persist in `gain_settings.json` across restarts/updates and
+override the startup config default. Terminal flags/config are independent.
+
+Choose **Auto** from the GUI Gain control before entering data collection mode,
+or use `--auto-gain` with `serial_monitor.py`. For unattended startup, set
+`DEFAULT["auto_gain"]["enabled"] = True` in `config.py`. Manual x64 remains the
+default. Auto starts at x1, uses one gain for all sequential channels, reduces at
+80% full scale (clipping returns to minimum), and increases after 10 seconds below
+20%. Gain limits, thresholds and a 3-second increase cooldown live in that section.
+Gain changes wait for ADS1256 auto-calibration and can create acquisition gaps.
+Do not combine `--gain` and `--auto-gain`. ADC data rate is unchanged by Auto.
+
+Before real use, validate safe input voltage/common-mode range, protection and
+high-impedance sensor conditioning. Auto gain is not input protection. Test a
+shorted differential input with proper AGND reference, known positive/negative
+voltages and controlled transients, then the sequential EX1-EX3 scan. Verify CSV
+gain, raw counts, conversion timestamps, clipping flags and post-change settling
+against a reference instrument. Current automated validation uses MockAdc only.
+
 The installed version appears in the window title and Help → About. Release
 numbers live in `VERSION`; Git release tags use the same number with a `v` prefix.
 

@@ -2,17 +2,23 @@
 import threading
 import time
 from typing import Callable, List
+from core.auto_gain import AutoGain, GainConfigurationError, read_scan
 
 
 class AcquisitionManager:
     """Simple acquisition manager that polls an AdcDevice in a background thread."""
 
-    def __init__(self, adc_device, channels: List[int] = [0], sample_rate: float = 10.0, averaging: int = 1, recorder=None):
+    def __init__(self, adc_device, channels: List[int] = [0], sample_rate: float = 10.0, averaging: int = 1, recorder=None, auto_gain=None):
         self.adc = adc_device
         self.channels = list(channels)
         self.sample_rate = float(sample_rate)
         self.averaging = int(averaging)
         self.recorder = recorder
+        self.auto_gain = AutoGain(**(auto_gain or {}))
+        self.last_scan_metadata = {}
+        self.clipped_scan_count = 0
+        self._settings_lock = threading.Lock()
+        self._requested_rate = None
         self.recording_error = None
         self.recording_retrying = False
         self.pending_recording = None
@@ -26,12 +32,17 @@ class AcquisitionManager:
     def add_callback(self, fn: Callable):
         self._callbacks.append(fn)
 
+    def remove_callback(self, fn: Callable):
+        if fn in self._callbacks:
+            self._callbacks.remove(fn)
+
     def start(self):
         if self.recording_error is not None and not self.recording_retrying:
             raise RuntimeError("Recording failed; restart after fixing storage") from self.recording_error
         if self._running:
             return
         self._stop_event.clear()
+        self.auto_gain.reset_quiet()
         self._running = True
         self.set_sample_rate(self.sample_rate)
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -48,11 +59,11 @@ class AcquisitionManager:
 
     def set_sample_rate(self, rate_hz: float):
         self.sample_rate = float(rate_hz)
-        if hasattr(self.adc, "set_sample_rate"):
-            try:
-                self.adc.set_sample_rate(self.sample_rate)
-            except Exception:
-                pass
+        if self._running:
+            with self._settings_lock:
+                self._requested_rate = self.sample_rate
+        elif hasattr(self.adc, "set_sample_rate"):
+            self.adc.set_sample_rate(self.sample_rate)
 
     def _run(self):
         while self._running:
@@ -66,18 +77,22 @@ class AcquisitionManager:
 
             if self.pending_recording is None:
                 try:
-                    for ch in self.channels:
-                        if self.averaging <= 1:
-                            v = self.adc.read_voltage(ch)
-                        else:
-                            s = 0.0
-                            for _ in range(self.averaging):
-                                s += self.adc.read_voltage(ch)
-                            v = s / self.averaging
-                        readings[ch] = v
+                    with self._settings_lock:
+                        rate = self._requested_rate
+                        self._requested_rate = None
+                    if rate is not None and hasattr(self.adc, "set_sample_rate"):
+                        try:
+                            self.adc.set_sample_rate(rate)
+                        except Exception as exc:
+                            raise GainConfigurationError(f"ADC configuration failed: {exc}") from exc
+                    readings = read_scan(self.adc, self.channels, self.averaging, self.auto_gain)
+                    self.last_scan_metadata = readings.metadata
+                    self.clipped_scan_count += readings.metadata["clipped"]
                 except Exception as e:
                     error = e
                     self._error_count += 1
+                    if isinstance(e, GainConfigurationError):
+                        self._running = False
 
             if error is None and self.recorder is not None:
                 try:
@@ -86,6 +101,7 @@ class AcquisitionManager:
                             self.recording_retrying = False
                             self.recording_error = None
                         else:
+                            self.auto_gain.reset_quiet()
                             first_failure = not self.recording_retrying
                             self.recording_retrying = True
                             self.recording_error = RuntimeError(

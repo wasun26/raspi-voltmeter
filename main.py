@@ -4,7 +4,7 @@ from pathlib import Path
 from PyQt6.QtCore import QLocale
 from PyQt6.QtWidgets import QApplication
 
-from config import DEFAULT, load_recording_settings
+from config import DEFAULT, load_recording_settings, load_gain_settings
 from hardware.adc import MockAdc
 from core.acquisition import AcquisitionManager
 from core.recording import CsvRecorder
@@ -58,7 +58,11 @@ def create_adc(adc_cfg):
 def main():
     QLocale.setDefault(QLocale.c())
     recording_settings = load_recording_settings()
-    adc = create_adc(DEFAULT.get("adc", {}))
+    gain_settings = load_gain_settings()
+    auto_settings = dict(DEFAULT.get("auto_gain", {}), enabled=gain_settings["auto"])
+    adc_settings = dict(DEFAULT.get("adc", {}))
+    adc_settings["gain"] = auto_settings["min_gain"] if gain_settings["auto"] else gain_settings["gain"]
+    adc = create_adc(adc_settings)
     print(f"[main] ADC in use: {adc.__class__.__name__}")
     recorder = CsvRecorder(
         recording_settings.pop("directory"), DEFAULT.get("channels", [0]), adc,
@@ -71,6 +75,7 @@ def main():
         sample_rate=DEFAULT.get("sample_rate", 20),
         averaging=DEFAULT.get("averaging", 1),
         recorder=recorder,
+        auto_gain=auto_settings,
     )
 
     print("[main] Before QApplication()")

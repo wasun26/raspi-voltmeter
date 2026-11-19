@@ -1,5 +1,17 @@
 # Planning
 
+Auto gain: implemented for GUI and terminal, with shared sequential-scan gain,
+x1 startup, 80% reduction threshold, 20%/10-second quiet increase criterion and
+3-second increase cooldown. GUI gain-mode choices persist across restarts/updates
+and override config. Manual x64 remains default. Acquisition owns gain
+changes; ADS1256 waits for automatic calibration and verifies the PGA register.
+CSV retains capture-time gain, per-conversion raw counts/timestamps, clipping and
+gain-change metadata even across storage retries. Auto requires these fields.
+Mock and driver-call tests cover bipolar clipping, averaging, channel peaks,
+hysteresis and metadata preservation. Real hardware settling, timing gaps,
+source-loading effects at different gains and transient accuracy remain planned
+validation. Input protection/bias and common-mode review remain prerequisites.
+
 Software versioning: implemented with `VERSION` and matching Git release tags,
 starting at `v0.1.0`. The update dialog displays release numbers and commit IDs;
 updates continue to follow new commits on `origin/main`. Raspberry Pi update

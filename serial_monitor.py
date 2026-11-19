@@ -8,6 +8,7 @@ import time
 from config import DEFAULT, load_recording_settings
 from hardware.adc import MockAdc
 from core.recording import CsvRecorder
+from core.auto_gain import AutoGain, read_scan
 
 try:
     from hardware.adc import ADS1256
@@ -135,6 +136,8 @@ def main():
                         help="Force MockAdc (same as --adc mock)")
     parser.add_argument("--gain", type=int, default=None,
                         help="PGA gain override, for example 1, 2, 4, 8, 16, 32, 64")
+    parser.add_argument("--auto-gain", action="store_true",
+                        help="Start at minimum gain and adjust automatically; clipping is logged")
     parser.add_argument("--data-rate", type=float, default=None,
                         help="ADS1256 data rate override in SPS")
     parser.add_argument("--single-ended", type=parse_bool, default=None,
@@ -160,6 +163,14 @@ def main():
     parser.add_argument("--quiet", action="store_true",
                         help="Print startup/errors only, suitable for unattended recording")
     args = parser.parse_args()
+    if args.auto_gain and args.gain is not None:
+        parser.error("choose --auto-gain or --gain")
+    gain_settings = dict(DEFAULT.get("auto_gain", {}))
+    if args.auto_gain:
+        gain_settings["enabled"] = True
+    elif args.gain is not None:
+        gain_settings["enabled"] = False
+    controller = AutoGain(**gain_settings)
     if args.rate <= 0 or args.averaging < 1 or args.count < 0:
         parser.error("rate and averaging must be positive; count must be nonnegative")
 
@@ -200,7 +211,7 @@ def main():
         return 1
 
     vref = float(getattr(adc, "vref", 2.5))
-    gain = float(getattr(adc, "gain", 1))
+    gain = float(controller.gains[0] if controller.enabled else getattr(adc, "gain", 1))
     single_ended = bool(getattr(adc, "single_ended", True))
     full_scale = vref / max(gain, 1.0)
     if not single_ended:
@@ -220,6 +231,8 @@ def main():
     rate_text = f" | ADS1256 data rate: {data_rate:g} SPS" if data_rate is not None else ""
     mode_text = "single-ended" if single_ended else "differential"
     print(f"Mode: {mode_text} | Gain: {gain:g} | Vref: {vref:g} V | Range: {range_text} | Unit: {unit}{rate_text}")
+    if controller.enabled:
+        print("Auto gain enabled; displayed range is the starting range. All channels are sampled sequentially.")
     print("Press Ctrl+C to stop.\n")
 
     period = 1.0 / args.rate if args.rate > 0 else 0.1
@@ -243,16 +256,7 @@ def main():
         while not stop_requested.is_set():
             started = time.monotonic()
             ts = time.time()
-            readings = []
-            for ch in channels:
-                if args.averaging <= 1:
-                    v = adc.read_voltage(ch)
-                else:
-                    s = 0.0
-                    for _ in range(args.averaging):
-                        s += adc.read_voltage(ch)
-                    v = s / args.averaging
-                readings.append((ch, v))
+            readings = read_scan(adc, channels, args.averaging, controller)
 
             if recorder is not None:
                 recording_failed = True
@@ -264,12 +268,13 @@ def main():
                         print("Storage recovered; recording resumed.", file=sys.stderr)
                         retry_active = False
                     elif not retry_active:
+                        controller.reset_quiet()
                         print(f"Storage unavailable; retrying every {recorder.retry_interval_sec} s: {exc}",
                               file=sys.stderr)
                         retry_active = True
 
                 if not recorder.write_with_retry(
-                        ts, dict(readings), stop_requested, retry_status,
+                        ts, readings, stop_requested, retry_status,
                         captured_monotonic=started):
                     print("Stopped during storage retry; pending sample was not saved.", file=sys.stderr)
                     recording_failed = False
@@ -279,9 +284,10 @@ def main():
                     print(f"CSV file: {recorder.path}")
 
             parts = [
-                f"{format_channel(ch)}: {v * scale:.{decimals}f} {unit}" for ch, v in readings]
+                f"{format_channel(ch)}: {v * scale:.{decimals}f} {unit}" for ch, v in readings.items()]
             if not args.quiet:
-                print(f"{ts:.3f} | " + " | ".join(parts))
+                print(f"{ts:.3f} | Gain x{readings.metadata['gain']} | " + " | ".join(parts)
+                      + (" | CLIPPED" if readings.metadata["clipped"] else ""))
 
             count += 1
             if args.count > 0 and count >= args.count:
