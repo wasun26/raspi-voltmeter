@@ -52,6 +52,21 @@ class RecordingUiTests(unittest.TestCase):
         self.assertGreaterEqual(self.acq.recorder.saved_count, minimum)
         self.win._update_ui()
 
+    def test_recording_fields_stay_aligned_when_sample_count_grows(self):
+        self.win.show()
+        fields = (self.win.folder_field, self.win.file_field)
+        self.recorder.saved_count = 999
+        self.win._update_ui()
+        self.app.processEvents()
+        original = [(field.x(), field.width()) for field in fields]
+        self.assertEqual(original[0], original[1])
+
+        self.recorder.saved_count = 1_000_000
+        self.win._update_ui()
+        self.app.processEvents()
+        self.assertIn("1,000,000", self.win.saved_count_label.text())
+        self.assertEqual([(field.x(), field.width()) for field in fields], original)
+
     def test_application_waits_for_start_measurement(self):
         import main
 
