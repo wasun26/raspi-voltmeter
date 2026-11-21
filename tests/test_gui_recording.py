@@ -113,6 +113,45 @@ class RecordingUiTests(unittest.TestCase):
         self.win.channel_checks[(4, 5)].setChecked(True)
         self.assertTrue(self.win.apply_channels_btn.isEnabled())
 
+    def test_graph_layout_switches_during_measurement_and_keeps_history(self):
+        first, second, third = (0, 1), (2, 3), (4, 5)
+        self.win.show()
+        self.app.processEvents()
+        for ch in (second, third):
+            self.win.channel_checks[ch].setChecked(True)
+        self.win.apply_channels_btn.click()
+        self.assertEqual(self.win.graph_layout_combo.currentText(), "Separate by channel")
+        self.assertEqual(self.win.plot_layout.count(), 3)
+
+        self.win.channel_checks[second].setChecked(False)
+        self.win.apply_channels_btn.click()
+        self.assertEqual(self.win.plot_layout.count(), 2)
+        self.assertEqual(list(self.win.curves), [first, third])
+        self.win.start_btn.click()
+        self.wait_for_saved(2)
+        recorder = self.acq.recorder
+        path = recorder.path
+        history_start = self.win._start_ts
+        self.assertIsNotNone(history_start)
+
+        self.win.graph_layout_combo.setCurrentIndex(1)
+        self.assertEqual(self.win.plot_layout.count(), 1)
+        self.assertEqual(list(self.win.curves), [first, third])
+        self.assertIn("EX1", self.win.graph_legend.text())
+        self.assertIn("EX3", self.win.graph_legend.text())
+        self.assertNotIn("EX2", self.win.graph_legend.text())
+        self.assertEqual(self.win._start_ts, history_start)
+        self.assertTrue(self.acq._running)
+        self.assertIs(self.acq.recorder, recorder)
+        self.wait_for_saved(recorder.saved_count + 1)
+        self.assertEqual(recorder.path, path)
+
+        self.win.graph_layout_combo.setCurrentIndex(0)
+        self.assertEqual(self.win.plot_layout.count(), 2)
+        self.assertEqual(self.win._start_ts, history_start)
+        self.assertTrue(self.win.graph_legend.isHidden())
+        self.win.start_btn.click()
+
     def test_auto_gain_switch_is_queued_and_visible_in_collection_mode(self):
         self.win.gain_combo.setCurrentIndex(0)
         self.assertEqual(self.adc.gain, 64)  # UI never accesses hardware directly.

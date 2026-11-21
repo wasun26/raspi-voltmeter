@@ -91,7 +91,10 @@ current app session. Set `channels` in `config.py` to change the startup selecti
 
 `AD6 − AD7` is reserved for a spare or reference input. Selecting just EX1 and
 EX3 reads `AD0 − AD1`, then `AD4 − AD5`, skipping EX2. The live readout and plot
-show the enabled specimens. Applying a different set starts a new CSV on the
+show the enabled specimens. **Voltage trend > Graph layout** defaults to one
+graph per enabled channel. Choose **Combined** to overlay the same traces in one
+graph. You can switch views during measurement and keep the current history.
+Applying a different set starts a new CSV on the
 next reading, with columns for the enabled pairs. Previous files keep their
 headers and data. The default CSV uses pin-based voltage names such as `AD4-AD5_mV`.
 

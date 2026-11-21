@@ -165,8 +165,8 @@ class MainWindow(QMainWindow):
         )
         self.setTabPosition(Qt.DockWidgetArea.AllDockWidgetAreas, QTabWidget.TabPosition.North)
         v = QVBoxLayout()
-        v.setContentsMargins(16, 12, 16, 12)
-        v.setSpacing(10)
+        v.setContentsMargins(12, 8, 12, 8)
+        v.setSpacing(7)
         w.setLayout(v)
 
         # Voltage display section
@@ -189,7 +189,7 @@ class MainWindow(QMainWindow):
         large_font.setBold(True)
         self.voltage_label.setFont(large_font)
         self.voltage_label.setStyleSheet(
-            "color: #2E7D32; background-color: #E8F5E9; padding: 20px; border-radius: 10px;")
+            "color: #2E7D32; background-color: #E8F5E9; padding: 14px; border-radius: 10px;")
         display_layout.addWidget(self.voltage_label)
         self.display_layout = display_layout
         self.voltage_font = large_font
@@ -200,7 +200,7 @@ class MainWindow(QMainWindow):
         status_font = QFont()
         status_font.setPointSize(12)
         self.status_label.setFont(status_font)
-        self.status_label.setStyleSheet("color: #666; padding: 10px;")
+        self.status_label.setStyleSheet("color: #666; padding: 4px;")
         display_layout.addWidget(self.status_label)
 
         v.addLayout(display_layout)
@@ -319,24 +319,33 @@ class MainWindow(QMainWindow):
         recording_layout.setRowStretch(8, 1)
         self.recording_dock = self._create_dock("Save data", "recording_dock", recording_group)
 
-        # Plot
-        self.plot_widget = create_plot_widget()
-        self.plot_widget.setMinimumHeight(160)
-        self.plot_widget.setLabel("left", "Voltage", units="mV")
-        self.plot_widget.setLabel("bottom", "Time", units="s")
-        self.plot_widget.setTitle("Voltage Trend")
-        self.chart_dock = self._create_dock("Voltage trend", "chart_dock", self.plot_widget)
-
+        chart_panel = QWidget()
+        chart_layout = QVBoxLayout(chart_panel)
+        chart_layout.setContentsMargins(8, 4, 8, 8)
+        chart_controls = QHBoxLayout()
+        layout_label = QLabel("Graph layout")
+        self.graph_layout_combo = QComboBox()
+        self.graph_layout_combo.addItem("Separate by channel", False)
+        self.graph_layout_combo.addItem("Combined", True)
+        layout_label.setBuddy(self.graph_layout_combo)
+        self.graph_legend = QLabel()
+        chart_controls.addWidget(layout_label)
+        chart_controls.addWidget(self.graph_layout_combo)
+        chart_controls.addStretch()
+        chart_controls.addWidget(self.graph_legend)
+        chart_layout.addLayout(chart_controls)
+        self.plot_layout = QHBoxLayout()
+        chart_layout.addLayout(self.plot_layout, 1)
+        self.chart_dock = self._create_dock("Voltage trend", "chart_dock", chart_panel)
         self.curves = {}
-        if hasattr(self.plot_widget, "addLegend"):
-            self.plot_widget.addLegend()
         self._rebuild_curves()
+        self.graph_layout_combo.currentIndexChanged.connect(self._change_graph_layout)
 
         self.splitDockWidget(self.measurement_dock, self.recording_dock, Qt.Orientation.Vertical)
         self.splitDockWidget(self.recording_dock, self.chart_dock, Qt.Orientation.Vertical)
         self.resizeDocks(
             [self.measurement_dock, self.recording_dock, self.chart_dock],
-            [220, 210, 280], Qt.Orientation.Vertical,
+            [245, 210, 260], Qt.Orientation.Vertical,
         )
         self._default_dock_state = self.saveState()
 
@@ -359,7 +368,7 @@ class MainWindow(QMainWindow):
             dock.show()
         self.resizeDocks(
             [self.measurement_dock, self.recording_dock, self.chart_dock],
-            [220, 210, 280], Qt.Orientation.Vertical,
+            [245, 210, 260], Qt.Orientation.Vertical,
         )
         if self._collection_mode:
             # Return to the reset layout when live view is requested later.
@@ -537,6 +546,7 @@ class MainWindow(QMainWindow):
             "Reaching a row limit continues in a new file; low disk space pauses new readings "
             "until the pending sample can be saved.\n\n"
             "File > Open recording folder (Ctrl+O) opens the saved files. "
+            "Use Graph layout in Voltage trend to switch between separate and combined graphs. "
             "Clear graph (Ctrl+R) clears display history only.\n\n"
             "Data collection mode (Ctrl+M) stops graph work and updates status every few seconds. "
             "ADC readings and CSV syncing continue unchanged. Return to live view starts a new graph history.\n\n"
@@ -619,7 +629,7 @@ class MainWindow(QMainWindow):
                 f"{self._format_channel(ch)}  {self._format_voltage(readings[ch])}"
                 for ch in self.acq.channels if ch in readings))
             self.voltage_label.setStyleSheet(
-                "color: #2E7D32; background-color: #E8F5E9; padding: 20px; border-radius: 10px;")
+                "color: #2E7D32; background-color: #E8F5E9; padding: 14px; border-radius: 10px;")
             self.status_label.setText("Measuring" if self.acq._running else "Paused — last measured value")
             self.status_label.setStyleSheet("color: #666; padding: 4px;")
         else:
@@ -939,15 +949,40 @@ class MainWindow(QMainWindow):
         self._update_source_label()
         self._update_ui()
 
+    def _change_graph_layout(self):
+        self._rebuild_curves()
+        self._update_ui()
+
+    def _add_plot(self, title=None):
+        plot = create_plot_widget()
+        plot.setMinimumHeight(140)
+        plot.setLabel("left", "Voltage", units="mV")
+        plot.setLabel("bottom", "Time", units="s")
+        if title is not None:
+            plot.setTitle(title)
+        self.plot_layout.addWidget(plot, 1)
+        return plot
+
     def _rebuild_curves(self):
-        for curve in self.curves.values():
-            self.plot_widget.removeItem(curve)
+        while self.plot_layout.count():
+            plot = self.plot_layout.takeAt(0).widget()
+            plot.hide()
+            plot.deleteLater()
         self.curves.clear()
+        combined = self.graph_layout_combo.currentData()
+        shared_plot = self._add_plot() if combined else None
         specimen_pairs = tuple(SPECIMEN_CHANNELS)
+        legend = []
         for index, ch in enumerate(self.acq.channels):
             color_index = specimen_pairs.index(ch) if ch in SPECIMEN_CHANNELS else index
-            pen = make_pen(color=self.CHANNEL_COLORS[color_index % len(self.CHANNEL_COLORS)], width=2)
-            self.curves[ch] = self.plot_widget.plot(pen=pen, name=self._format_channel(ch))
+            color = self.CHANNEL_COLORS[color_index % len(self.CHANNEL_COLORS)]
+            name = self._format_channel(ch)
+            plot = shared_plot if combined else self._add_plot(name)
+            self.curves[ch] = plot.plot(pen=make_pen(color=color, width=2), name=name)
+            legend.append(f'<span style="color:{color};">━ {name}</span>')
+        self.graph_legend.setText(" &nbsp; ".join(legend) if combined else "")
+        self.graph_legend.setVisible(bool(self.graph_legend.text()))
+        self._last_plot_revision = -1  # Redraw existing history in the new layout.
 
     def _calc_maxlen(self) -> int:
         rate = float(getattr(self.acq, "sample_rate", 1.0))

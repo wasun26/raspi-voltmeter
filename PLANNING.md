@@ -116,7 +116,8 @@ Exit: calibrated output has documented error/uncertainty and is reproducible fro
 
 ### Phase 5 — EX1-EX3 GUI
 
-- Implemented labeled raw-voltage traces for enabled channels.
+- Implemented separate raw-voltage graphs by default, with a combined view for
+  overlaying the enabled channels.
 - Show backend, saturation, effective rate, logging state, and calibration state.
 - Add start/stop experiment and deliberate zero/baseline controls.
 - Permit raw and calibrated views without discarding raw data.
