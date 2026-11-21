@@ -5,8 +5,9 @@ x1 startup, 80% reduction threshold, 20%/10-second quiet increase criterion and
 3-second increase cooldown. GUI gain-mode choices persist across restarts/updates
 and override config. Manual x64 remains default. Acquisition owns gain
 changes; ADS1256 waits for automatic calibration and verifies the PGA register.
-CSV retains capture-time gain, per-conversion raw counts/timestamps, clipping and
-gain-change metadata even across storage retries. Auto requires these fields.
+Acquisition retains capture-time gain, per-conversion raw counts and timestamps,
+clipping and gain-change metadata across storage retries. Detailed CSVs can
+store those fields. Voltage-only CSVs store the enabled pairs in mV.
 Mock and driver-call tests cover bipolar clipping, averaging, channel peaks,
 hysteresis and metadata preservation. Real hardware settling, timing gaps,
 source-loading effects at different gains and transient accuracy remain planned
@@ -55,10 +56,14 @@ ADS1256 has one converter behind a multiplexer, so EX1-EX3 are scanned sequentia
   still pending. The update stops acquisition and leaves a measurement gap.
 - ADS1256 driver, Waveshare-style SPI, manual BCM 22 CS, BCM 17 DRDY, and BCM 18 RESET are implemented.
 - Raspberry Pi 5 uses `rpi-lgpio`; Pi 4 retains `RPi.GPIO`; macOS uses `MockAdc` in auto mode.
-- Current default is one differential pair AIN0-AIN1, gain 64, 30 SPS, and VREF 2.5 V.
-- `serial_monitor.py` already parses multiple differential pairs.
-- GUI and default configuration still target one specimen.
-- Three-specimen behavior and analog conditioning are planned, not yet hardware-validated.
+- Startup defaults are EX1 (AIN0-AIN1), gain 64, 30 SPS, and VREF 2.5 V.
+- The GUI waits for **Start measurement** before acquisition and CSV recording.
+- The GUI can enable any nonempty subset of EX1–EX3 while paused. Acquisition,
+  readout and plots use those fixed pairs in pin order. A channel change starts
+  a new CSV session with the selected pairs.
+- The terminal accepts explicit differential pairs, including non-adjacent pairs.
+- Three-specimen acquisition is implemented and tested with MockAdc. Real scan
+  timing, settling and analog conditioning remain to be hardware-validated.
 
 ## Questions to Resolve
 
@@ -84,11 +89,11 @@ Exit: reviewed schematic, expected voltage range, selected gain/rate, and safe c
 
 ### Phase 2 — Acquire EX1-EX3
 
-- Configure named channels EX1-EX3 using pairs 0-1, 2-3, and 4-5.
-- Implement an explicit scan cycle and per-conversion timestamps.
+- Implemented EX1-EX3 selection using fixed pairs 0-1, 2-3, and 4-5.
+- Implemented a sequential scan and per-conversion timestamps.
 - Validate multiplexer settling and discard/delay the first post-switch conversion if required.
 - Report ADC rate, aggregate rate, and measured effective per-channel rate.
-- Simulate distinct three-channel signals in mock mode.
+- MockAdc keeps independent samples and raw counts for each channel.
 
 Exit: stable three-channel terminal acquisition with verified timing and labels.
 
@@ -112,7 +117,8 @@ Exit: calibrated output has documented error/uncertainty and is reproducible fro
 
 ### Phase 5 — EX1-EX3 GUI
 
-- Show three labeled traces, using raw voltage by default.
+- Implemented separate raw-voltage graphs by default, with a combined view for
+  overlaying the enabled channels.
 - Show backend, saturation, effective rate, logging state, and calibration state.
 - Add start/stop experiment and deliberate zero/baseline controls.
 - Permit raw and calibrated views without discarding raw data.
@@ -150,8 +156,9 @@ Exit: repeatable end-to-end results and documented limitations for the project r
 ## Out of Scope Until Characterized
 
 Durable CSV recording now runs in the acquisition path and terminal monitor:
-flush/fsync per reading, daily/session file separation, explicit ADC source and
-mV units, stop on recording failure, and graceful shutdown before file closure.
+flush/fsync per reading, daily/session file separation, measured voltage in mV by
+default, optional ADC source and capture metadata, and graceful shutdown before
+file closure.
 `voltmeter.service.example` provides opt-in unattended startup on Raspberry Pi OS.
 Mock tests cover rotation, session preservation, sync failures, and shutdown.
 Real hardware, month-long operation, and abrupt power-loss testing remain site

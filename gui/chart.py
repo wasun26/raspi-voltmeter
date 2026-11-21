@@ -49,6 +49,10 @@ class SimplePlotWidget(QWidget):
         self._curves.append(curve)
         return curve
 
+    def removeItem(self, curve):
+        self._curves.remove(curve)
+        self.update()
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)

@@ -7,6 +7,7 @@ from PyQt6.QtCore import QEvent, QLocale, Qt, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QAction, QDesktopServices, QFont
 from PyQt6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QDockWidget,
     QDialog,
     QFileDialog,
@@ -29,14 +30,15 @@ from PyQt6.QtWidgets import (
 )
 
 from gui.chart import create_plot_widget, make_pen
-from core.recording import CsvRecorder
-from config import save_recording_settings, save_gain_settings
+from core.recording import CsvRecorder, channel_name, columns_for_channels
+from config import SPECIMEN_CHANNELS, save_recording_settings, save_gain_settings
 from gui.recording_settings import RecordingSettingsDialog
 from app_version import APP_VERSION
 
 
 class MainWindow(QMainWindow):
     _error_received = pyqtSignal()
+    CHANNEL_COLORS = ("#C24521", "#1769AA", "#287D3C", "#A55F00", "#8E24AA", "#007B86")
 
     def __init__(
         self,
@@ -53,6 +55,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(720, 740)
         self.acq = acquisition_manager
         self.acq.add_callback(self._on_data)
+        self._csv_column_preferences = self.acq.recorder.included_columns if self.acq.recorder else None
 
         self.plot_window_sec = int(plot_window_sec)
         self.plot_max_points = int(plot_max_points)
@@ -127,7 +130,7 @@ class MainWindow(QMainWindow):
         elif self.acq.pending_recording is not None:
             state, color = "Paused - unsaved sample", "#9A6700"
         elif not self.acq._running:
-            state = "Paused"
+            state = "Ready" if self._last is None else "Paused"
         elif self.acq.recorder is None:
             state, color = "Measuring - saving disabled", "#9A6700"
         elif not self.acq.recorder.saved_count:
@@ -162,8 +165,8 @@ class MainWindow(QMainWindow):
         )
         self.setTabPosition(Qt.DockWidgetArea.AllDockWidgetAreas, QTabWidget.TabPosition.North)
         v = QVBoxLayout()
-        v.setContentsMargins(16, 12, 16, 12)
-        v.setSpacing(10)
+        v.setContentsMargins(12, 8, 12, 8)
+        v.setSpacing(7)
         w.setLayout(v)
 
         # Voltage display section
@@ -171,25 +174,22 @@ class MainWindow(QMainWindow):
         display_layout.setSpacing(4)
         display_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.source_label = QLabel(
-            f"{type(self.acq.adc).__name__} | "
-            + ", ".join(self._format_channel(ch) for ch in self.acq.channels)
-        )
+        self.source_label = QLabel()
         self.source_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         if type(self.acq.adc).__name__ == "MockAdc":
-            self.source_label.setText(self.source_label.text() + " | SIMULATED DATA")
             self.source_label.setStyleSheet("color: #9A6700; font-weight: bold;")
+        self._update_source_label()
         display_layout.addWidget(self.source_label)
 
         # Large voltage readout
         self.voltage_label = QLabel("-- mV")
         self.voltage_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         large_font = QFont()
-        large_font.setPointSize(36)
+        large_font.setPointSize(36 if len(self.acq.channels) == 1 else 20)
         large_font.setBold(True)
         self.voltage_label.setFont(large_font)
         self.voltage_label.setStyleSheet(
-            "color: #2E7D32; background-color: #E8F5E9; padding: 20px; border-radius: 10px;")
+            "color: #2E7D32; background-color: #E8F5E9; padding: 14px; border-radius: 10px;")
         display_layout.addWidget(self.voltage_label)
         self.display_layout = display_layout
         self.voltage_font = large_font
@@ -200,7 +200,7 @@ class MainWindow(QMainWindow):
         status_font = QFont()
         status_font.setPointSize(12)
         self.status_label.setFont(status_font)
-        self.status_label.setStyleSheet("color: #666; padding: 10px;")
+        self.status_label.setStyleSheet("color: #666; padding: 4px;")
         display_layout.addWidget(self.status_label)
 
         v.addLayout(display_layout)
@@ -209,13 +209,13 @@ class MainWindow(QMainWindow):
         control_layout = QHBoxLayout()
         control_layout.setSpacing(10)
 
-        self.start_btn = QPushButton("Pause measurement")
+        self.start_btn = QPushButton("Start measurement")
         self.start_btn.setMinimumWidth(155)
-        self.start_btn.setToolTip("Pause both measurement and CSV recording; saved data is kept.")
+        self.start_btn.setToolTip("Start or pause measurement and CSV recording.")
         self.start_btn.clicked.connect(self._toggle)
         control_layout.addWidget(self.start_btn)
 
-        rate_label = QLabel("Sample Rate:")
+        rate_label = QLabel("Scan target")
         control_layout.addWidget(rate_label)
 
         self.rate_spin = QSpinBox()
@@ -223,6 +223,7 @@ class MainWindow(QMainWindow):
         self.rate_spin.setGroupSeparatorShown(True)
         self.rate_spin.setRange(1, 10000)
         self.rate_spin.setValue(int(self.acq.sample_rate))
+        self.rate_spin.setToolTip("Target scans per second. Actual rate depends on ADC data rate, channel switching and recording.")
         self.rate_spin.valueChanged.connect(self._change_rate)
         control_layout.addWidget(self.rate_spin)
         control_layout.addWidget(QLabel("Hz"))
@@ -246,6 +247,25 @@ class MainWindow(QMainWindow):
         control_layout.addStretch()
 
         v.addLayout(control_layout)
+        self.channel_checks = {}
+        if not self.acq.adc.single_ended and all(ch in SPECIMEN_CHANNELS for ch in self.acq.channels):
+            channel_row = QHBoxLayout()
+            channel_row.addWidget(QLabel("Channels"))
+            for index, (pair, specimen) in enumerate(SPECIMEN_CHANNELS.items()):
+                check = QCheckBox(f"{specimen} ({channel_name(pair)})")
+                check.setStyleSheet(f"color: {self.CHANNEL_COLORS[index]};")
+                check.setChecked(pair in self.acq.channels)
+                check.toggled.connect(self._update_channel_controls)
+                self.channel_checks[pair] = check
+                channel_row.addWidget(check)
+            self.apply_channels_btn = QPushButton("Apply channels")
+            self.apply_channels_btn.clicked.connect(self._apply_channel_selection)
+            channel_row.addWidget(self.apply_channels_btn)
+            channel_row.addStretch()
+            self.channel_status = QLabel()
+            self.channel_status.setWordWrap(True)
+            v.addLayout(channel_row)
+            v.addWidget(self.channel_status)
         self.measurement_dock = self._create_dock("Measurement", "measurement_dock", w)
 
         recording_group = QGroupBox()
@@ -260,8 +280,12 @@ class MainWindow(QMainWindow):
         recording_layout.addWidget(self.recording_label, 1, 0, 1, 3)
         self.saved_count_label = QLabel("Saved samples: 0")
         self.last_saved_label = QLabel("Last saved: —")
-        recording_layout.addWidget(self.saved_count_label, 2, 0)
-        recording_layout.addWidget(self.last_saved_label, 2, 1, 1, 2)
+        summary_row = QHBoxLayout()
+        summary_row.setSpacing(12)
+        summary_row.addWidget(self.saved_count_label)
+        summary_row.addWidget(self.last_saved_label)
+        summary_row.addStretch()
+        recording_layout.addLayout(summary_row, 2, 0, 1, 3)
         self.file_info_label = QLabel()
         self.file_info_label.setWordWrap(True)
         recording_layout.addWidget(self.file_info_label, 3, 0, 1, 3)
@@ -291,7 +315,7 @@ class MainWindow(QMainWindow):
             actions.addWidget(button)
         actions.addStretch()
         recording_layout.addLayout(actions, 6, 0, 1, 3)
-        hint = QLabel("Auto-save every reading in mV • Pause stops measurement and saving • Existing files are kept")
+        hint = QLabel("Auto-save every reading to CSV • Pause stops measurement and saving")
         hint.setWordWrap(True)
         hint.setStyleSheet("color: #666; font-size: 11px;")
         recording_layout.addWidget(hint, 7, 0, 1, 3)
@@ -299,27 +323,33 @@ class MainWindow(QMainWindow):
         recording_layout.setRowStretch(8, 1)
         self.recording_dock = self._create_dock("Save data", "recording_dock", recording_group)
 
-        # Plot
-        self.plot_widget = create_plot_widget()
-        self.plot_widget.setMinimumHeight(160)
-        self.plot_widget.setLabel("left", "Voltage", units="mV")
-        self.plot_widget.setLabel("bottom", "Time", units="s")
-        self.plot_widget.setTitle("Voltage Trend")
-        self.chart_dock = self._create_dock("Voltage trend", "chart_dock", self.plot_widget)
-
+        chart_panel = QWidget()
+        chart_layout = QVBoxLayout(chart_panel)
+        chart_layout.setContentsMargins(8, 4, 8, 8)
+        chart_controls = QHBoxLayout()
+        layout_label = QLabel("Graph layout")
+        self.graph_layout_combo = QComboBox()
+        self.graph_layout_combo.addItem("Separate by channel", False)
+        self.graph_layout_combo.addItem("Combined", True)
+        layout_label.setBuddy(self.graph_layout_combo)
+        self.graph_legend = QLabel()
+        chart_controls.addWidget(layout_label)
+        chart_controls.addWidget(self.graph_layout_combo)
+        chart_controls.addStretch()
+        chart_controls.addWidget(self.graph_legend)
+        chart_layout.addLayout(chart_controls)
+        self.plot_layout = QHBoxLayout()
+        chart_layout.addLayout(self.plot_layout, 1)
+        self.chart_dock = self._create_dock("Voltage trend", "chart_dock", chart_panel)
         self.curves = {}
-        colors = ["#FF5722", "#2196F3", "#4CAF50",
-                  "#FFC107", "#9C27B0", "#00BCD4"]
-        for i, ch in enumerate(self.acq.channels):
-            pen = make_pen(color=colors[i % len(colors)], width=2)
-            self.curves[ch] = self.plot_widget.plot(
-                pen=pen, name=self._format_channel(ch))
+        self._rebuild_curves()
+        self.graph_layout_combo.currentIndexChanged.connect(self._change_graph_layout)
 
         self.splitDockWidget(self.measurement_dock, self.recording_dock, Qt.Orientation.Vertical)
         self.splitDockWidget(self.recording_dock, self.chart_dock, Qt.Orientation.Vertical)
         self.resizeDocks(
             [self.measurement_dock, self.recording_dock, self.chart_dock],
-            [220, 210, 280], Qt.Orientation.Vertical,
+            [245, 210, 260], Qt.Orientation.Vertical,
         )
         self._default_dock_state = self.saveState()
 
@@ -342,7 +372,7 @@ class MainWindow(QMainWindow):
             dock.show()
         self.resizeDocks(
             [self.measurement_dock, self.recording_dock, self.chart_dock],
-            [220, 210, 280], Qt.Orientation.Vertical,
+            [245, 210, 260], Qt.Orientation.Vertical,
         )
         if self._collection_mode:
             # Return to the reset layout when live view is requested later.
@@ -506,9 +536,12 @@ class MainWindow(QMainWindow):
 
     def _show_recording_guide(self):
         QMessageBox.information(self, "Recording guide",
-            "Readings are saved automatically to CSV in mV.\n\n"
+            "CSV defaults to the enabled channels’ voltage in mV.\n\n"
+            "Choose Start measurement (Ctrl+Space) to begin reading and saving. "
             "Pause measurement (Ctrl+Space) stops both reading and saving. "
-            "Start measurement resumes the current session.\n\n"
+            "Starting again resumes the current session.\n\n"
+            "While paused, select EX1–EX3 in Measurement and choose Apply channels. "
+            "Selected pairs are scanned in pin order. A new CSV starts on the next reading.\n\n"
             "To change destination, pause first, then choose File > Change recording folder. "
             "A new session starts and existing files are kept. "
             "File > Recording settings sets the maximum data rows per file (header excluded), "
@@ -518,6 +551,7 @@ class MainWindow(QMainWindow):
             "Reaching a row limit continues in a new file; low disk space pauses new readings "
             "until the pending sample can be saved.\n\n"
             "File > Open recording folder (Ctrl+O) opens the saved files. "
+            "Use Graph layout in Voltage trend to switch between separate and combined graphs. "
             "Clear graph (Ctrl+R) clears display history only.\n\n"
             "Data collection mode (Ctrl+M) stops graph work and updates status every few seconds. "
             "ADC readings and CSV syncing continue unchanged. Return to live view starts a new graph history.\n\n"
@@ -595,14 +629,12 @@ class MainWindow(QMainWindow):
             self.voltage_label.setStyleSheet(
                 "color: #2E7D32; background-color: #E8F5E9; padding: 12px; border-radius: 10px;")
         elif self._last is not None:
-            if len(self.acq.channels) == 1:
-                self.voltage_label.setText(self._format_voltage(self._last.get(self.acq.channels[0], 0.0)))
-            else:
-                self.voltage_label.setText(" | ".join(
-                    f"{self._format_channel(ch)}: {self._format_voltage(self._last.get(ch, 0.0))}"
-                    for ch in self.acq.channels))
+            readings = self._last
+            self.voltage_label.setText("  |  ".join(
+                f"{self._format_channel(ch)}  {self._format_voltage(readings[ch])}"
+                for ch in self.acq.channels if ch in readings))
             self.voltage_label.setStyleSheet(
-                "color: #2E7D32; background-color: #E8F5E9; padding: 20px; border-radius: 10px;")
+                "color: #2E7D32; background-color: #E8F5E9; padding: 14px; border-radius: 10px;")
             self.status_label.setText("Measuring" if self.acq._running else "Paused — last measured value")
             self.status_label.setStyleSheet("color: #666; padding: 4px;")
         else:
@@ -625,6 +657,7 @@ class MainWindow(QMainWindow):
         retrying = self.acq.recording_retrying
         failed = self.acq.recording_error is not None and not retrying
         running = self.acq._running
+        self._update_channel_controls()
         self.start_btn.setEnabled(not failed)
         self.start_btn.setText("Stopped" if failed else "Pause measurement" if running else "Start measurement")
         self.change_folder_btn.setEnabled(recorder is not None and not running and not failed)
@@ -650,7 +683,10 @@ class MainWindow(QMainWindow):
         elif self.acq.pending_recording is not None:
             state, color = "Paused with one unsaved sample - start measurement to retry", "#9A6700"
         elif not running:
-            state, color = "Paused - saved files are kept", "#9A6700"
+            if recorder.saved_count:
+                state, color = "Paused - saved files are kept", "#9A6700"
+            else:
+                state, color = "Ready to record - choose Start measurement", "#666"
         elif self._last_error is not None:
             state, color = "Waiting for valid ADC data - no new samples saved", "#9A6700"
         elif recorder.saved_count:
@@ -745,6 +781,7 @@ class MainWindow(QMainWindow):
             self._update_ui()
             return False
         self.acq.recorder = replacement
+        self._csv_column_preferences = replacement.included_columns
         self._update_ui()
         return True
 
@@ -756,6 +793,8 @@ class MainWindow(QMainWindow):
             if self._last_error is not None and self.acq.recording_error is None:
                 self._last_error = None
         else:
+            for pair, check in self.channel_checks.items():
+                check.setChecked(pair in self.acq.channels)
             self.acq.start()
         self._update_ui()
 
@@ -837,9 +876,121 @@ class MainWindow(QMainWindow):
         return f"{value_v * scale:.{decimals}f} {unit}"
 
     def _format_channel(self, channel) -> str:
-        if isinstance(channel, (tuple, list)) and len(channel) == 2:
-            return f"AD{channel[0]}-AD{channel[1]}"
-        return f"CH{channel}"
+        return SPECIMEN_CHANNELS.get(channel, channel_name(channel))
+
+    def _update_source_label(self):
+        source = type(self.acq.adc).__name__
+        channels = ", ".join(self._format_channel(ch) for ch in self.acq.channels)
+        parts = [source, channels]
+        if len(self.acq.channels) > 1:
+            parts.append("Sequential scan")
+        if source == "MockAdc":
+            parts.append("SIMULATED DATA")
+        self.source_label.setText(" | ".join(parts))
+
+    def _selected_channels(self):
+        return [pair for pair, check in self.channel_checks.items() if check.isChecked()]
+
+    def _can_change_channels(self):
+        return not (self.acq._running or self.acq.recording_error is not None
+                    or self.acq.pending_recording is not None)
+
+    def _update_channel_controls(self):
+        if not self.channel_checks:
+            return
+        editable = self._can_change_channels()
+        selected = self._selected_channels()
+        for check in self.channel_checks.values():
+            check.setEnabled(editable)
+        changed = selected != self.acq.channels
+        self.apply_channels_btn.setEnabled(editable and bool(selected) and changed)
+        if self.acq.recording_error is not None and not self.acq.recording_retrying:
+            message = "Resolve the recording error before changing channels."
+        elif self.acq.pending_recording is not None:
+            message = "Resume measurement to save the pending reading before changing channels."
+        elif self.acq._running:
+            message = "Pause measurement to change channels."
+        elif not selected:
+            message = "Select at least one channel."
+        elif changed:
+            message = "Apply the selection before starting measurement."
+        else:
+            message = "Selected channels are read in pin order."
+        self.channel_status.setText(message)
+
+    def _apply_channel_selection(self):
+        channels = self._selected_channels()
+        if not channels or channels == self.acq.channels or not self._can_change_channels():
+            return
+        self.acq.stop()  # Join the worker before changing the scan and CSV schema.
+        if not self._can_change_channels():
+            self._update_ui()
+            return
+        recorder = self.acq.recorder
+        if recorder is not None:
+            options = recorder.options()
+            options["included_columns"] = columns_for_channels(self._csv_column_preferences, channels)
+            try:
+                replacement = CsvRecorder(recorder.directory, channels, self.acq.adc,
+                                          self.acq.averaging, **options)
+            except (OSError, ValueError) as exc:
+                QMessageBox.warning(self, "Channels", f"Could not prepare CSV recording: {exc}")
+                return
+            try:
+                recorder.close()
+            except OSError as exc:
+                self.acq.recording_error = RuntimeError(f"Recording close failed: {exc}")
+                self._update_ui()
+                return
+            self.acq.recorder = replacement
+        self.acq.channels = channels
+        self.acq.last_scan_metadata = {}
+        self._last = None
+        self._last_error = None
+        with self._data_lock:
+            self._start_ts = None
+            self._time_buffer.clear()
+            self.buffers = {ch: deque(maxlen=self._calc_maxlen()) for ch in channels}
+        self._rebuild_curves()
+        self.voltage_font.setPointSize(36 if len(channels) == 1 else 20)
+        self.voltage_label.setFont(self.voltage_font)
+        self._update_source_label()
+        self._update_ui()
+
+    def _change_graph_layout(self):
+        self._rebuild_curves()
+        self._update_ui()
+
+    def _add_plot(self, title=None):
+        plot = create_plot_widget()
+        plot.setMinimumHeight(140)
+        plot.setLabel("left", "Voltage", units="mV")
+        plot.setLabel("bottom", "Time", units="s")
+        if title is not None:
+            plot.setTitle(title)
+        self.plot_layout.addWidget(plot, 1)
+        return plot
+
+    def _rebuild_curves(self):
+        while self.plot_layout.count():
+            plot = self.plot_layout.takeAt(0).widget()
+            plot.hide()
+            plot.deleteLater()
+        self.curves.clear()
+        combined = self.graph_layout_combo.currentData()
+        shared_plot = self._add_plot() if combined else None
+        specimen_pairs = tuple(SPECIMEN_CHANNELS)
+        legend = []
+        for index, ch in enumerate(self.acq.channels):
+            color_index = specimen_pairs.index(ch) if ch in SPECIMEN_CHANNELS else index
+            color = self.CHANNEL_COLORS[color_index % len(self.CHANNEL_COLORS)]
+            name = self._format_channel(ch)
+            plot = shared_plot if combined else self._add_plot(name)
+            self.curves[ch] = plot.plot(pen=make_pen(color=color, width=2), name=name)
+            legend.append(f'<span style="color:{color};">━ {name}</span>')
+        self.graph_legend.setText(" &nbsp; ".join(legend) if combined else "")
+        self.graph_legend.setVisible(bool(self.graph_legend.text()))
+        self._last_plot_revision = -1  # Redraw existing history in the new layout.
 
     def _calc_maxlen(self) -> int:
         rate = float(getattr(self.acq, "sample_rate", 1.0))

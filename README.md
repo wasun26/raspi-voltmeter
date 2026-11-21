@@ -17,7 +17,7 @@ The default application mode is tuned for low-level millivolt differential measu
 - RESET pin: BCM `18`
 - Manual CS pin: BCM `22`
 - Expected ADS1256 chip ID: `3`
-- Input mode: differential `AD0-AD1`
+- Input mode: differential, with `EX1` (`AD0-AD1`) enabled at startup
 - PGA gain: `64`
 - ADC data rate: `30` SPS by default
 - Vref: `2.5` V
@@ -77,6 +77,37 @@ On non-Raspberry Pi machines, `main.py` and `serial_monitor.py` use `MockAdc` wh
 On Windows, double-click `run_voltmeter.bat` to open the GUI using the project's
 virtual environment, or run `.\.venv\Scripts\python.exe -B main.py` in PowerShell.
 
+The GUI opens ready to measure. Choose **Start measurement** (`Ctrl+Space`) to
+begin reading channels and create a CSV on the first reading. The terminal
+monitor starts reading as soon as its command runs.
+
+## Specimen channels
+
+Pause measurement, select one to three channels in the **Measurement** panel,
+choose **Apply channels**, then start measurement. Checkboxes apply to the
+current app session. Set `channels` in `config.py` to change the startup selection.
+
+| Specimen | Differential input on the Waveshare board |
+| --- | --- |
+| EX1 | `AD0 − AD1` |
+| EX2 | `AD2 − AD3` |
+| EX3 | `AD4 − AD5` |
+
+`AD6 − AD7` is reserved for a spare or reference input. Selecting just EX1 and
+EX3 reads `AD0 − AD1`, then `AD4 − AD5`, skipping EX2. The live readout and plot
+show the enabled specimens. **Voltage trend > Graph layout** defaults to one
+graph per enabled channel. Choose **Combined** to overlay the same traces in one
+graph. You can switch views during measurement and keep the current history.
+Applying a different set starts a new CSV on the
+next reading, with columns for the enabled pairs. Previous files keep their
+headers and data. The default CSV uses pin-based voltage names such as `AD4-AD5_mV`.
+
+The ADS1256 samples the selected channels sequentially. **Scan target** is
+the requested number of complete scans per second. ADC data rate is measured
+in conversions per second. At 30 SPS, three channels with averaging set to 1
+can each get up to 10 readings per second before switching, settling and
+recording overhead. Detailed CSV recording can include each conversion timestamp by pair.
+
 ## Auto gain
 
 Select **Auto** in the Gain control before entering data collection mode. Manual
@@ -100,12 +131,13 @@ bias/common-mode limits, source impedance and conditioning before specimen tests
 Nominal differential full scale at VREF 2.5 V is +/-5 V at x1 and +/-78.125 mV at
 x64; each pin's limits relative to AGND must also be satisfied.
 
-CSV capture metadata records actual gain, mode, change reason/duration, ADC data
+Detailed CSV capture metadata records actual gain, mode, change reason/duration, ADC data
 rate, peak fraction and clipping. Per-channel fields record conversion timestamps
 and raw counts, including JSON arrays containing every conversion when averaging.
 `raw_count` is the last conversion; `raw_min`/`raw_max` span the averaging group.
-Auto enforces these metadata columns even when earlier preferences hid them;
-schema changes start a new file. Mock raw counts are simulated. UI reports current
+Auto includes these metadata columns when a detailed CSV selection is in use.
+Voltage-only CSVs keep their voltage columns in Auto. Schema changes start a
+new file. Mock raw counts are simulated. UI reports current
 gain and cumulative clipped scans even when the graph is disabled.
 
 Terminal use: `python serial_monitor.py --mock --auto-gain --rate 5 --channels 0-1,2-3,4-5 --count 5`.
@@ -174,14 +206,16 @@ uses `flush()` and `os.fsync()` before being counted as saved. No in-memory queu
 builds up: slow storage reduces the effective acquisition rate. This records
 software readings, not every ADC conversion at the configured hardware SPS.
 
-CSV files use date/time and sequential file numbers, rotate on the local calendar day by default, and never
-overwrite existing files. Columns include time with timezone, Unix time, monotonic
-elapsed seconds, sequence number, actual ADC class (`ADS1256` or `MockAdc`), input
-mode, gain, Vref, averaging count, and mV columns such as `AD0-AD1_mV`.
-In **Recording settings > CSV columns**, choose which columns to save. Local
-timestamp and at least one voltage channel are required. Applying the setting
-while paused starts a new CSV file; existing files retain their original columns.
-Old CSV files are not deleted automatically.
+CSV files use date/time and sequential file numbers, rotate on the local calendar
+day by default, and preserve existing files. By default, each row contains only
+the enabled channels’ measured voltage in mV. For EX1 and EX3 the columns are
+`AD0-AD1_mV` and `AD4-AD5_mV`.
+
+To replace a remembered column selection, pause and choose **Voltage only (mV)**
+in **Recording settings > CSV columns**. The same panel supports optional
+columns such as timestamp, ADC source, gain, and conversion metadata. At least
+one voltage column is required. Applying the setting starts a new CSV on the
+next reading.
 
 Test recording without hardware:
 
@@ -197,7 +231,8 @@ python serial_monitor.py --adc ads1256 --channels 0-1 --rate 30 --quiet --log-di
 ```
 
 Use `--adc ads1256` at the test site so missing hardware fails instead of recording
-mock measurements. `auto` retains its mock fallback, which is labeled in the CSV.
+mock measurements. `auto` retains its mock fallback. The terminal and GUI show
+the active ADC, and detailed CSVs can include `adc_source`.
 `--no-log` disables terminal recording; `--log-dir` selects its destination.
 The GUI shows the CSV path and number of successfully synced samples. On a storage
 write, sync, or low-space error, acquisition holds its current sample and retries
@@ -206,8 +241,8 @@ and recovery even with `--quiet`. New ADC readings pause until that sample is sa
 an outage therefore leaves a time gap in the measurements. When storage returns,
 the retry uses a new CSV file and acquisition resumes automatically. If a sync
 failed after a row reached the drive, the old file may contain an unconfirmed copy
-of that row; use timestamp and sequence when combining files. Non-storage errors
-still stop acquisition.
+of that row. The optional timestamp and sequence columns can identify the
+duplicate. Non-storage errors still stop acquisition.
 
 The GUI's **Save data — CSV** panel shows saving/paused/error status, saved sample
 count, last saved time, recording folder, and current file. **Open folder** and
@@ -216,7 +251,7 @@ and saving; **Start measurement** resumes into the same session. To select a new
 destination, pause first and use **Change folder…**; this starts a new CSV session
 with its own saved count and keeps old files. Folder selection applies to the
 current run; set `log_dir` in `config.py` to change the startup destination.
-The chart uses mV, matching the CSV, and mock measurements are labeled
+The chart uses mV, and mock measurements are labeled
 **SIMULATED DATA**.
 
 The menu bar provides **File** (open/change recording folder, copy path, exit),
@@ -244,7 +279,7 @@ that session's counters, and keeps all old files.
 | File name prefix | `voltmeter` | Letters/numbers/underscore/hyphen; date, time and sequential file number are added. |
 | Max data lines / file | `100000` | Excludes the CSV header. Rotate before the next row once full; `0` disables this limit. |
 | Daily rotation | On | Rotate on the local calendar day, independently of the row limit. |
-| CSV columns | All | Keep local timestamp and at least one voltage channel; select the remaining fields. |
+| CSV columns | Voltage only (mV) | Save each enabled pair in millivolts. Detailed fields are available in settings. |
 | Minimum free drive space | `100` MiB | Check before the first write and every 5 seconds; pause acquisition and retry below the threshold. `0` disables the reserve. Never delete old files. |
 | Storage retry interval | `5` s | Retry the pending sample without taking new readings until it is saved. |
 | Remember settings | On | Store preferences in `recording_settings.json` in the project folder for GUI and terminal startup. |

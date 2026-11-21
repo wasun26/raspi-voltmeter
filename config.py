@@ -7,6 +7,8 @@ import tempfile
 RECORDING_SETTINGS_PATH = Path(__file__).resolve().parent / "recording_settings.json"
 GAIN_SETTINGS_PATH = Path(__file__).resolve().parent / "gain_settings.json"
 
+SPECIMEN_CHANNELS = {(0, 1): "EX1", (2, 3): "EX2", (4, 5): "EX3"}
+
 DEFAULT = {
     "adc": {
         "type": "auto",
@@ -50,7 +52,7 @@ DEFAULT = {
         "file_prefix": "voltmeter",
         "rotate_daily": True,
         "min_free_mb": 100,  # Stop when drive free space drops below this.
-        "included_columns": None,  # All columns by default; timestamp and one mV channel are required.
+        "included_columns": None,  # Save only the enabled channels' voltage in mV by default.
         "retry_interval_sec": 5,  # Retry one pending sample; no unbounded queue.
     },
 }

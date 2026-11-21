@@ -115,7 +115,8 @@ class AcquisitionManager:
 
                     if not self.recorder.write_with_retry(
                             ts, readings, self._stop_event, retry_status,
-                            captured_monotonic=captured_monotonic):
+                            captured_monotonic=captured_monotonic,
+                            finish_on_stop=self.pending_recording is None):
                         self.pending_recording = (ts, readings, captured_monotonic)
                         break
                     self.pending_recording = None

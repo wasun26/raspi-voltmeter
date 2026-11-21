@@ -3,6 +3,7 @@ import csv
 import os
 from pathlib import Path
 import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -50,6 +51,151 @@ class RecordingUiTests(unittest.TestCase):
             time.sleep(0.01)
         self.assertGreaterEqual(self.acq.recorder.saved_count, minimum)
         self.win._update_ui()
+
+    def test_recording_fields_stay_aligned_when_sample_count_grows(self):
+        self.win.show()
+        fields = (self.win.folder_field, self.win.file_field)
+        self.recorder.saved_count = 999
+        self.win._update_ui()
+        self.app.processEvents()
+        original = [(field.x(), field.width()) for field in fields]
+        self.assertEqual(original[0], original[1])
+
+        self.recorder.saved_count = 1_000_000
+        self.win._update_ui()
+        self.app.processEvents()
+        self.assertIn("1,000,000", self.win.saved_count_label.text())
+        self.assertEqual([(field.x(), field.width()) for field in fields], original)
+
+    def test_application_waits_for_start_measurement(self):
+        import main
+
+        windows = []
+
+        def open_window(**kwargs):
+            window = MainWindow(**kwargs)
+            windows.append(window)
+            self.addCleanup(window.close)
+            return window
+
+        def exercise_window():
+            window = windows[0]
+            self.assertFalse(window.acq._running)
+            self.assertIsNone(window.acq.recorder.path)
+            self.assertEqual(window.start_btn.text(), "Start measurement")
+            window.start_btn.click()
+            self.assertTrue(window.acq._running)
+            return 0
+
+        settings = dict(main.DEFAULT["recording"], directory=self.temp.name)
+        with patch.object(main, "QApplication", return_value=self.app), \
+             patch.object(self.app, "exec", side_effect=exercise_window), \
+             patch.object(main, "MainWindow", side_effect=open_window), \
+             patch.object(main, "create_adc", return_value=self.adc), \
+             patch.object(main, "load_recording_settings", return_value=settings), \
+             self.assertRaises(SystemExit) as exited:
+            main.main()
+        self.assertEqual(exited.exception.code, 0)
+
+    def test_specimen_selection_reads_fixed_pairs_and_rotates_csv(self):
+        first, second, third = (0, 1), (2, 3), (4, 5)
+        checks = self.win.channel_checks
+        checks[first].setChecked(False)
+        self.assertFalse(self.win.apply_channels_btn.isEnabled())
+        self.assertEqual(self.acq.channels, [first])
+        for pair in (third, second, first):
+            checks[pair].setChecked(True)
+        self.win.apply_channels_btn.click()
+        self.assertEqual(self.acq.channels, [first, second, third])
+        with patch.object(self.adc, "read_voltage", wraps=self.adc.read_voltage) as read:
+            self.win.start_btn.click()
+            self.wait_for_saved()
+            self.assertTrue(all(not check.isEnabled() for check in checks.values()))
+            self.win.start_btn.click()
+            self.assertEqual([call.args[0] for call in read.call_args_list[:3]], [first, second, third])
+        self.assertIn("EX2", self.win.voltage_label.text())
+        old_path = self.acq.recorder.path
+        old_contents = old_path.read_bytes()
+
+        checks[second].setChecked(False)
+        self.win.apply_channels_btn.click()
+        self.assertEqual(self.acq.channels, [first, third])
+        self.assertEqual(list(self.win.curves), [first, third])
+        self.assertIn("Sequential scan", self.win.source_label.text())
+        self.assertEqual(self.win.voltage_label.text(), "-- mV")
+        with patch.object(self.adc, "read_voltage", wraps=self.adc.read_voltage) as read:
+            self.win.start_btn.click()
+            self.wait_for_saved()
+            self.win.start_btn.click()
+            self.assertEqual([call.args[0] for call in read.call_args_list],
+                             [first, third] * self.acq.recorder.saved_count)
+        self.assertIn("EX1", self.win.voltage_label.text())
+        self.assertNotIn("EX2", self.win.voltage_label.text())
+        self.assertIn("EX3", self.win.voltage_label.text())
+        self.assertEqual(old_path.read_bytes(), old_contents)
+        with self.acq.recorder.path.open(newline="") as handle:
+            row = next(csv.DictReader(handle))
+        self.assertIn("AD0-AD1_mV", row)
+        self.assertIn("AD4-AD5_mV", row)
+        self.assertIn("AD4-AD5_conversion_unix_s", row)
+        self.assertNotIn("AD2-AD3_mV", row)
+
+    def test_pause_saves_in_progress_scan_before_channels_can_change(self):
+        entered = threading.Event()
+        read_voltage = self.adc.read_voltage
+
+        def read_while_pausing(channel):
+            entered.set()
+            self.acq._stop_event.wait(timeout=2)
+            return read_voltage(channel)
+
+        with patch.object(self.adc, "read_voltage", side_effect=read_while_pausing):
+            self.win.start_btn.click()
+            self.assertTrue(entered.wait(timeout=2))
+            self.win.start_btn.click()
+        self.assertEqual(self.recorder.saved_count, 1)
+        self.assertIsNone(self.acq.pending_recording)
+        self.win.channel_checks[(4, 5)].setChecked(True)
+        self.assertTrue(self.win.apply_channels_btn.isEnabled())
+
+    def test_graph_layout_switches_during_measurement_and_keeps_history(self):
+        first, second, third = (0, 1), (2, 3), (4, 5)
+        self.win.show()
+        self.app.processEvents()
+        for ch in (second, third):
+            self.win.channel_checks[ch].setChecked(True)
+        self.win.apply_channels_btn.click()
+        self.assertEqual(self.win.graph_layout_combo.currentText(), "Separate by channel")
+        self.assertEqual(self.win.plot_layout.count(), 3)
+
+        self.win.channel_checks[second].setChecked(False)
+        self.win.apply_channels_btn.click()
+        self.assertEqual(self.win.plot_layout.count(), 2)
+        self.assertEqual(list(self.win.curves), [first, third])
+        self.win.start_btn.click()
+        self.wait_for_saved(2)
+        recorder = self.acq.recorder
+        path = recorder.path
+        history_start = self.win._start_ts
+        self.assertIsNotNone(history_start)
+
+        self.win.graph_layout_combo.setCurrentIndex(1)
+        self.assertEqual(self.win.plot_layout.count(), 1)
+        self.assertEqual(list(self.win.curves), [first, third])
+        self.assertIn("EX1", self.win.graph_legend.text())
+        self.assertIn("EX3", self.win.graph_legend.text())
+        self.assertNotIn("EX2", self.win.graph_legend.text())
+        self.assertEqual(self.win._start_ts, history_start)
+        self.assertTrue(self.acq._running)
+        self.assertIs(self.acq.recorder, recorder)
+        self.wait_for_saved(recorder.saved_count + 1)
+        self.assertEqual(recorder.path, path)
+
+        self.win.graph_layout_combo.setCurrentIndex(0)
+        self.assertEqual(self.win.plot_layout.count(), 2)
+        self.assertEqual(self.win._start_ts, history_start)
+        self.assertTrue(self.win.graph_legend.isHidden())
+        self.win.start_btn.click()
 
     def test_auto_gain_switch_is_queued_and_visible_in_collection_mode(self):
         self.win.gain_combo.setCurrentIndex(0)
@@ -289,6 +435,19 @@ class RecordingUiTests(unittest.TestCase):
             self.assertFalse(self.win._apply_recording_settings(options, remember=True))
         self.assertIs(self.acq.recorder, self.recorder)
         warning.assert_called_once()
+
+    def test_voltage_only_preset_replaces_detailed_columns_and_follows_channels(self):
+        dialog = RecordingSettingsDialog(self.recorder, self.win)
+        dialog._select_voltage_only()
+        self.assertEqual(dialog.recording_options()["included_columns"], ["AD0-AD1_mV"])
+        self.assertTrue(self.win._apply_recording_settings(dialog.recording_options()))
+        self.win.channel_checks[(4, 5)].setChecked(True)
+        self.win.apply_channels_btn.click()
+        self.win.start_btn.click()
+        self.wait_for_saved()
+        self.win.start_btn.click()
+        with self.acq.recorder.path.open(newline="") as handle:
+            self.assertEqual(csv.DictReader(handle).fieldnames, ["AD0-AD1_mV", "AD4-AD5_mV"])
 
     def test_numeric_controls_use_ascii_digits_under_arabic_system_locale(self):
         previous = QLocale()

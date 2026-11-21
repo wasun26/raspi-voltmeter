@@ -11,7 +11,8 @@ import unittest
 from unittest.mock import patch
 
 from core.acquisition import AcquisitionManager
-from core.recording import CsvRecorder
+from core.auto_gain import ScanReadings
+from core.recording import CsvRecorder, columns_for_channels
 from hardware.adc import MockAdc
 from config import load_recording_settings, save_recording_settings
 
@@ -72,12 +73,24 @@ class RecordingTests(unittest.TestCase):
             self.assertEqual(row["AD2-AD3_mV"], str(index * 10))
         self.assertEqual(recorder.options()["included_columns"], columns)
 
-    def test_selected_columns_require_time_and_voltage(self):
-        for columns in (["timestamp"], ["AD0-AD1_mV"],
+    def test_selected_columns_require_voltage(self):
+        for columns in (["timestamp"], ["vref_V"],
                         ["timestamp", "unknown", "AD0-AD1_mV"],
                         ["timestamp", "timestamp", "AD0-AD1_mV"]):
             with self.subTest(columns=columns), self.assertRaises(ValueError):
                 CsvRecorder(self.temp.name, [(0, 1)], self.adc, included_columns=columns)
+
+    def test_voltage_only_records_millivolts_even_in_auto_gain(self):
+        channels = [(0, 1), (4, 5)]
+        columns = columns_for_channels(["AD0-AD1_mV"], channels)
+        recorder = CsvRecorder(self.temp.name, channels, self.adc, included_columns=columns)
+        self.addCleanup(recorder.close)
+        readings = ScanReadings(metadata={"gain_mode": "auto", "gain": 64, "clipped": 0})
+        readings.update({(0, 1): 0.0123456789, (4, 5): -0.00125})
+        recorder.write(time.time(), readings)
+        row = self.rows(recorder.path)[0]
+        self.assertEqual(list(row), ["AD0-AD1_mV", "AD4-AD5_mV"])
+        self.assertEqual(row, {"AD0-AD1_mV": "12.3456789", "AD4-AD5_mV": "-1.25"})
 
     def test_same_timestamp_filename_collisions_use_numbers_not_random_names(self):
         timestamp = datetime(2026, 10, 11, 14, 30, 0).timestamp()
@@ -226,14 +239,16 @@ class RecordingTests(unittest.TestCase):
     def test_terminal_records_five_rows(self):
         result = subprocess.run(
             [sys.executable, "-B", "serial_monitor.py", "--mock", "--rate", "100",
-             "--count", "5", "--quiet", "--retry-seconds", "1",
+             "--count", "5", "--quiet", "--retry-seconds", "1", "--channels", "0-1,4-5",
              "--log-dir", self.temp.name],
             capture_output=True, text=True, timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         files = list(Path(self.temp.name).glob("*.csv"))
         self.assertEqual(len(files), 1)
-        self.assertEqual(len(self.rows(files[0])), 5)
+        rows = self.rows(files[0])
+        self.assertEqual(len(rows), 5)
+        self.assertEqual(list(rows[0]), ["AD0-AD1_mV", "AD4-AD5_mV"])
 
     def test_terminal_exits_on_invalid_storage(self):
         blocked = Path(self.temp.name) / "not_a_directory"
