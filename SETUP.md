@@ -26,6 +26,9 @@ numbers live in `VERSION`; Git release tags use the same number with a `v` prefi
 
 Setup instructions for Raspberry Pi OS and development machines.
 
+In the GUI, confirm the ADC and channel selection, then choose **Start measurement**
+to begin acquisition and CSV recording.
+
 ## macOS
 
 Python 3 is required. Then run:

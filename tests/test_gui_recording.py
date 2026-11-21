@@ -52,6 +52,36 @@ class RecordingUiTests(unittest.TestCase):
         self.assertGreaterEqual(self.acq.recorder.saved_count, minimum)
         self.win._update_ui()
 
+    def test_application_waits_for_start_measurement(self):
+        import main
+
+        windows = []
+
+        def open_window(**kwargs):
+            window = MainWindow(**kwargs)
+            windows.append(window)
+            self.addCleanup(window.close)
+            return window
+
+        def exercise_window():
+            window = windows[0]
+            self.assertFalse(window.acq._running)
+            self.assertIsNone(window.acq.recorder.path)
+            self.assertEqual(window.start_btn.text(), "Start measurement")
+            window.start_btn.click()
+            self.assertTrue(window.acq._running)
+            return 0
+
+        settings = dict(main.DEFAULT["recording"], directory=self.temp.name)
+        with patch.object(main, "QApplication", return_value=self.app), \
+             patch.object(self.app, "exec", side_effect=exercise_window), \
+             patch.object(main, "MainWindow", side_effect=open_window), \
+             patch.object(main, "create_adc", return_value=self.adc), \
+             patch.object(main, "load_recording_settings", return_value=settings), \
+             self.assertRaises(SystemExit) as exited:
+            main.main()
+        self.assertEqual(exited.exception.code, 0)
+
     def test_specimen_selection_reads_fixed_pairs_and_rotates_csv(self):
         first, second, third = (0, 1), (2, 3), (4, 5)
         checks = self.win.channel_checks

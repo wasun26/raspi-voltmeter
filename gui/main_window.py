@@ -130,7 +130,7 @@ class MainWindow(QMainWindow):
         elif self.acq.pending_recording is not None:
             state, color = "Paused - unsaved sample", "#9A6700"
         elif not self.acq._running:
-            state = "Paused"
+            state = "Ready" if self._last is None else "Paused"
         elif self.acq.recorder is None:
             state, color = "Measuring - saving disabled", "#9A6700"
         elif not self.acq.recorder.saved_count:
@@ -209,9 +209,9 @@ class MainWindow(QMainWindow):
         control_layout = QHBoxLayout()
         control_layout.setSpacing(10)
 
-        self.start_btn = QPushButton("Pause measurement")
+        self.start_btn = QPushButton("Start measurement")
         self.start_btn.setMinimumWidth(155)
-        self.start_btn.setToolTip("Pause both measurement and CSV recording; saved data is kept.")
+        self.start_btn.setToolTip("Start or pause measurement and CSV recording.")
         self.start_btn.clicked.connect(self._toggle)
         control_layout.addWidget(self.start_btn)
 
@@ -533,8 +533,9 @@ class MainWindow(QMainWindow):
     def _show_recording_guide(self):
         QMessageBox.information(self, "Recording guide",
             "CSV defaults to the enabled channels’ voltage in mV.\n\n"
+            "Choose Start measurement (Ctrl+Space) to begin reading and saving. "
             "Pause measurement (Ctrl+Space) stops both reading and saving. "
-            "Start measurement resumes the current session.\n\n"
+            "Starting again resumes the current session.\n\n"
             "While paused, select EX1–EX3 in Measurement and choose Apply channels. "
             "Selected pairs are scanned in pin order. A new CSV starts on the next reading.\n\n"
             "To change destination, pause first, then choose File > Change recording folder. "
@@ -678,7 +679,10 @@ class MainWindow(QMainWindow):
         elif self.acq.pending_recording is not None:
             state, color = "Paused with one unsaved sample - start measurement to retry", "#9A6700"
         elif not running:
-            state, color = "Paused - saved files are kept", "#9A6700"
+            if recorder.saved_count:
+                state, color = "Paused - saved files are kept", "#9A6700"
+            else:
+                state, color = "Ready to record - choose Start measurement", "#666"
         elif self._last_error is not None:
             state, color = "Waiting for valid ADC data - no new samples saved", "#9A6700"
         elif recorder.saved_count:

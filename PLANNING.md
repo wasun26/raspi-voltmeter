@@ -57,6 +57,7 @@ ADS1256 has one converter behind a multiplexer, so EX1-EX3 are scanned sequentia
 - ADS1256 driver, Waveshare-style SPI, manual BCM 22 CS, BCM 17 DRDY, and BCM 18 RESET are implemented.
 - Raspberry Pi 5 uses `rpi-lgpio`; Pi 4 retains `RPi.GPIO`; macOS uses `MockAdc` in auto mode.
 - Startup defaults are EX1 (AIN0-AIN1), gain 64, 30 SPS, and VREF 2.5 V.
+- The GUI waits for **Start measurement** before acquisition and CSV recording.
 - The GUI can enable any nonempty subset of EX1–EX3 while paused. Acquisition,
   readout and plots use those fixed pairs in pin order. A channel change starts
   a new CSV session with the selected pairs.

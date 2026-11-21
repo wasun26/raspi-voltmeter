@@ -77,6 +77,10 @@ On non-Raspberry Pi machines, `main.py` and `serial_monitor.py` use `MockAdc` wh
 On Windows, double-click `run_voltmeter.bat` to open the GUI using the project's
 virtual environment, or run `.\.venv\Scripts\python.exe -B main.py` in PowerShell.
 
+The GUI opens ready to measure. Choose **Start measurement** (`Ctrl+Space`) to
+begin reading channels and create a CSV on the first reading. The terminal
+monitor starts reading as soon as its command runs.
+
 ## Specimen channels
 
 Pause measurement, select one to three channels in the **Measurement** panel,

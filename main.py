@@ -93,7 +93,6 @@ def main():
     )
     win.show()
 
-    acq.start()
     try:
         result = app.exec()
     finally:
