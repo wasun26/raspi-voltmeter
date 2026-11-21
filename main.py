@@ -4,6 +4,7 @@ from pathlib import Path
 from PyQt6.QtCore import QLocale
 from PyQt6.QtWidgets import QApplication
 
+from app_version import APP_NAME, APP_VERSION
 from config import DEFAULT, load_recording_settings, load_gain_settings
 from hardware.adc import MockAdc
 from core.acquisition import AcquisitionManager
@@ -83,6 +84,9 @@ def main():
 
     print("[main] Before QApplication()")
     app = QApplication(sys.argv)
+    app.setApplicationName(APP_NAME)
+    app.setApplicationDisplayName(APP_NAME)
+    app.setApplicationVersion(APP_VERSION)
     print("[main] After QApplication()")
     win = MainWindow(
         acquisition_manager=acq,

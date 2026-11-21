@@ -33,7 +33,7 @@ from gui.chart import create_plot_widget, make_pen
 from core.recording import CsvRecorder, channel_name, columns_for_channels
 from config import SPECIMEN_CHANNELS, save_recording_settings, save_gain_settings
 from gui.recording_settings import RecordingSettingsDialog
-from app_version import APP_VERSION
+from app_version import APP_NAME, APP_VERSION
 
 
 class MainWindow(QMainWindow):
@@ -50,7 +50,7 @@ class MainWindow(QMainWindow):
     ):
         super().__init__()
         self.setLocale(QLocale.c())
-        self.setWindowTitle(f"Voltmeter v{APP_VERSION}")
+        self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
         self.resize(960, 760)
         self.setMinimumSize(720, 740)
         self.acq = acquisition_manager
@@ -452,7 +452,7 @@ class MainWindow(QMainWindow):
         help_menu.addSeparator()
         action(help_menu, "Recording &guide", self._show_recording_guide, "F1")
         help_menu.addSeparator()
-        action(help_menu, "&About Voltmeter", self._show_about)
+        action(help_menu, f"&About {APP_NAME}", self._show_about)
 
     def _clear_graph(self):
         # Clear only display history; never touch saved data or its sequence.
@@ -564,9 +564,11 @@ class MainWindow(QMainWindow):
             "The Save data panel shows retry status.")
 
     def _show_about(self):
-        QMessageBox.about(self, "About Voltmeter",
-            f"Voltmeter v{APP_VERSION}\n\nADS1256 differential measurement with live plotting "
-            "and automatic CSV recording.\n\n"
+        QMessageBox.about(self, f"About {APP_NAME}",
+            f"{APP_NAME} v{APP_VERSION}\n\n"
+            "Measures voltage signals from cement-based piezoelectric composites "
+            "for structural health monitoring research.\n\n"
+            "ADS1256 differential measurement, live graphs, and CSV recording.\n\n"
             f"Current ADC: {type(self.acq.adc).__name__}\n"
             "Built with Python and PyQt6.")
 

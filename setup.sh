@@ -12,7 +12,7 @@ cd "$SCRIPT_DIR"
 trap 'echo -e "\n${RED}Setup stopped at line ${LINENO}. Fix the error above, then run bash setup.sh again.${NC}" >&2' ERR
 
 echo "=========================================="
-echo "PyQt Voltmeter - Setup"
+echo "Piezoelectric Monitor - Setup"
 echo "=========================================="
 echo "Project directory: $SCRIPT_DIR"
 

@@ -1,6 +1,8 @@
-# PyQt Voltmeter for Raspberry Pi
+# Piezoelectric Monitor
 
-Simple Raspberry Pi voltmeter application with a PyQt6 GUI, live plotting, a terminal-only monitor, and a mock ADC fallback for development without hardware.
+Raspberry Pi application for measuring voltage signals from cement-based
+piezoelectric composite specimens for structural health monitoring research.
+It provides live graphs, CSV recording, a terminal monitor, and a mock ADC.
 
 ## Current Hardware Target
 
@@ -146,7 +148,7 @@ accuracy on Raspberry Pi/ADS1256 remain to be hardware-validated.
 
 ## Update from the app
 
-The current software version is shown in the window title and **Help → About**.
+The software version is shown in the window title, status bar, and **Help → About Piezoelectric Monitor**.
 `VERSION` is the single source of the release number. For each release, bump it
 using `MAJOR.MINOR.PATCH`, commit the change, and tag that commit `vMAJOR.MINOR.PATCH`
 (for example, `v0.1.0`). Push both the commit and tag to publish a release. The
@@ -158,8 +160,8 @@ maintainer pushes new code to `origin/main`. Click **Check for updates** in the
 toolbar or Help menu. Checking does not interrupt measurement. If a version is
 available, click **Update and restart**. The app stops acquisition, closes the
 current CSV, updates code with a fast-forward merge, installs changed Python
-requirements if needed, and reopens. Recording resumes in a new CSV session, so
-there is a measurement gap during the update.
+requirements if needed, and reopens. Choose **Start measurement** to begin a new
+CSV session after the update.
 
 The update preserves `logs/`, `recording_settings.json`, and other untracked
 data. It refuses to overwrite locally edited tracked code (including

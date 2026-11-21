@@ -21,8 +21,9 @@ voltages and controlled transients, then the sequential EX1-EX3 scan. Verify CSV
 gain, raw counts, conversion timestamps, clipping flags and post-change settling
 against a reference instrument. Current automated validation uses MockAdc only.
 
-The installed version appears in the window title and Help → About. Release
-numbers live in `VERSION`; Git release tags use the same number with a `v` prefix.
+The installed version appears in the Piezoelectric Monitor window title, status
+bar, and Help → About Piezoelectric Monitor. Release numbers live in `VERSION`.
+Git release tags use the same number with a `v` prefix.
 
 Setup instructions for Raspberry Pi OS and development machines.
 

@@ -10,7 +10,7 @@ LOG_FILE="$PROJECT_DIR/launcher.log"
 if [ ! -x "$VENV_PYTHON" ]; then
     MESSAGE="Virtual environment not found. Run: bash $PROJECT_DIR/setup.sh"
     if command -v notify-send >/dev/null 2>&1; then
-        notify-send "PyQt Voltmeter" "$MESSAGE"
+        notify-send "Piezoelectric Monitor" "$MESSAGE"
     fi
     echo "$MESSAGE" >&2
     exit 1

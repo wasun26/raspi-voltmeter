@@ -6,6 +6,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
 from app_update import check_for_update, install_update
+from app_version import APP_NAME
 
 
 class UpdateWorker(QThread):
@@ -30,7 +31,7 @@ class UpdateDialog(QDialog):
         self.info = None
         self.worker = None
         self.busy = False
-        self.setWindowTitle("Update Voltmeter")
+        self.setWindowTitle(f"Update {APP_NAME}")
         self.setMinimumWidth(420)
 
         layout = QVBoxLayout(self)
@@ -66,7 +67,7 @@ class UpdateDialog(QDialog):
             self.status.setText(f"Could not check for updates:\n{error}")
         elif not info.needs_update:
             version = f"v{info.current_version}" if info.current_version else info.current[:8]
-            self.status.setText(f"Voltmeter {version} is up to date.")
+            self.status.setText(f"{APP_NAME} {version} is up to date.")
         else:
             self.info = info
             current = f"v{info.current_version}" if info.current_version else info.current[:8]
@@ -98,7 +99,7 @@ class UpdateDialog(QDialog):
                 self.status.setText(self.status.text() + f"\nCould not resume measurement: {resume_error}")
             self.close_button.setEnabled(True)
             return
-        self.status.setText("Updated. Restarting Voltmeter...")
+        self.status.setText(f"Updated. Restarting {APP_NAME}...")
         self.main_window.restart_after_update(self)
 
     def reject(self):

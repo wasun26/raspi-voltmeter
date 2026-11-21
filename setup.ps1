@@ -2,7 +2,7 @@
 # Run: powershell -ExecutionPolicy Bypass -File setup.ps1
 
 Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host "PyQt Voltmeter - Windows Dev Setup" -ForegroundColor Cyan
+Write-Host "Piezoelectric Monitor - Windows Dev Setup" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 
 # Check Python
